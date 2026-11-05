@@ -1,8 +1,9 @@
 ## Interface: 16001
-## Title: WoWBY |cff8080ffБеларуская|r (Forever)
+## Title: WoWBY — Belarusian Translation
+## IconTexture: Interface\AddOns\WoWBY\icon
 ## Notes: Беларускі пераклад WoW Forever: заданні, імёны, размовы, прадметы, заклёны, мапы і інтэрфейс
 ## Author: Trasiankus
-## Version: 2026.11.05
+## Version: 2026.11.05.3
 ## SavedVariables: WoWBY_DB
 ## AddonCompartmentFunc: WoWBY_OnCompartmentClick
 ## X-License: GPL-3.0

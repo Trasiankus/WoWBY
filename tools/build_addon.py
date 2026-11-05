@@ -16,7 +16,8 @@ INTERFACE = "16001"  # client 1.60.1 -> 1*10000 + 60*100 + 1 (same scheme as 1.1
 DATA_FILES = ["quests.lua", "zones.lua", "gossip.lua", "names.lua"]
 
 TOC = """## Interface: {iface}
-## Title: WoWBY |cff8080ffБеларуская|r (Forever)
+## Title: WoWBY — Belarusian Translation
+## IconTexture: Interface\\AddOns\\WoWBY\\icon
 ## Notes: Беларускі пераклад WoW Forever: заданні, імёны, размовы, прадметы, заклёны, мапы і інтэрфейс
 ## Author: Trasiankus
 ## Version: {version}

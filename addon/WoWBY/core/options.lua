@@ -4,7 +4,12 @@ local _, W = ...
 -- ---------- options window (left-click BY / addon compartment / /wowby) ----------
 local minimapBtn
 local opts
-local function update_label() if minimapBtn then minimapBtn.text:SetText(W.is_be() and "BY" or "EN") end end
+local function update_label()
+    if not minimapBtn then return end
+    local be = W.is_be()
+    minimapBtn.text:SetText(be and "BY" or "EN")
+    if be then minimapBtn.text:SetTextColor(1, 0.82, 0) else minimapBtn.text:SetTextColor(0.85, 0.85, 0.85) end
+end
 local function set_lang(be)
     WoWBY_DB.lang = be and "be" or "en"
     -- R384: to English → every text we swapped in still showing our Belarusian gets its English back first
@@ -377,12 +382,16 @@ function W.create_minimap_button()
     b:SetSize(31, 31); b:SetFrameStrata("MEDIUM"); b:SetFrameLevel(8)
     b:RegisterForClicks("LeftButtonUp", "RightButtonUp"); b:RegisterForDrag("LeftButton")
     local bg = b:CreateTexture(nil, "BACKGROUND")
-    bg:SetSize(21, 21); bg:SetPoint("CENTER", 0, 1); bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+    bg:SetSize(22, 22); bg:SetPoint("CENTER"); bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+    bg:SetVertexColor(0.25, 0.25, 0.25)
     local txt = b:CreateFontString(nil, "ARTWORK")
-    txt:SetFont(W.FONT, 13, "OUTLINE"); txt:SetPoint("CENTER", 0, 1); txt:SetTextColor(0.6, 0.6, 1)
+    txt:SetFont(W.FONT, 11, ""); txt:SetPoint("CENTER"); txt:SetShadowColor(0, 0, 0, 1); txt:SetShadowOffset(1, -1)
     b.text = txt
+    -- the ring's hole is off-centre in its texture (measured: 17 / 16.5 px of 53 from the top left), so shift the ring
+    -- to put the hole on the button's centre; everything else then simply anchors to CENTER
     local border = b:CreateTexture(nil, "OVERLAY")
-    border:SetSize(53, 53); border:SetPoint("TOPLEFT"); border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+    border:SetSize(53, 53); border:SetPoint("TOPLEFT", -1.5, 1); border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+    b:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
     b:SetScript("OnClick", function(_, button) if button == "RightButton" then toggle_lang() else toggle_options() end end)
     b:SetScript("OnDragStart", function()
         b:SetScript("OnUpdate", function()
