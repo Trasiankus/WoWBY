@@ -1,0 +1,38 @@
+## Interface: 16001
+## Title: WoWBY |cff8080ffБеларуская|r (Forever)
+## Notes: Беларускі пераклад WoW Forever: заданні, імёны, размовы, прадметы, заклёны, мапы і інтэрфейс
+## Author: Trasiankus
+## Version: 2026.11.05
+## SavedVariables: WoWBY_DB
+## AddonCompartmentFunc: WoWBY_OnCompartmentClick
+## X-License: GPL-3.0
+
+data\quests.lua
+data\zones.lua
+data\gossip.lua
+data\names.lua
+data\quest_guard.lua
+data\forever.lua
+data\quest_sig.lua
+data\spells_items.lua
+data\ui.lua
+data\titles.lua
+data\books.lua
+data\questnpc.lua
+data\ru.lua [AllowLoadTextLocale ruRU]
+core\base.lua
+core\ru.lua
+core\quests.lua
+core\fonts.lua
+core\names.lua
+core\spells.lua
+core\zones.lua
+core\nameplates.lua
+core\ui.lua
+core\dialogueui.lua
+core\messages.lua
+core\tooltips.lua
+core\labels.lua
+core\books.lua
+core\options.lua
+core\events.lua
