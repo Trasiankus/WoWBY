@@ -15,7 +15,7 @@ only on ruRU: TOC [AllowLoadTextLocale ruRU] + a GetLocale guard), read by core/
 Sources (EN <-> RU pairs): out/globalstrings_keys.tsv, out/db2/*.tsv, the local world DB dump (custom-wow penqle-tortoise
 locales_*: creatures, objects, quests, items, pages, broadcast texts, gossip options, greetings, mail, areas, POI), Questie
 ruRU lookups (NPCs + titles, objects, items, quests) and the wowhead RU scrape (forever-data/ru: NPCs, objects, quests)."""
-import collections, json, os, re, sys
+import collections, json, os, re, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_addon import (ROOT, OUT, tsv, lua_str, gossip_keys, book_key, FMT_TOKEN, desc_sd, _nl, lua_pattern, be_parts,  # noqa: E402
@@ -537,6 +537,84 @@ RACES_F = {"Ночная эльфийка": "Night Elf", "Дворфийка": "
 PREFER = {"Персональный предмет": "Soulbound", "Мир": "World"}
 
 
+# Russian declension (R803/R804): RU formats wrap a value as |3-N(%s), and the client swaps the word for its N-th form from
+# DeclinedWordCases: «Защита» + |3-6 = «Ваш навык защиты», «Огонь» + |3-6 = «урона от огня». The Forever client here has
+# English only, so the forms come from the 3.3.5 ruRU files in custom-wow (Forever's DB2 ruRU is not local; same table).
+DECLINED_DBC = r"C:\Projects\custom-wow\client\dbc"
+
+
+def read_dbc(name):
+    b = open(os.path.join(DECLINED_DBC, name + ".dbc"), "rb").read()
+    _, n, fields, size, _ = struct.unpack("<4s4I", b[:20])
+    strings = b[20 + n * size:]
+
+    def text(o):
+        return strings[o:strings.index(b"\0", o)].decode("utf-8", "replace")
+    return [struct.unpack_from("<%di" % fields, b, 20 + i * size) for i in range(n)], text
+
+
+def declined_words():
+    """{base word: {case: form}}"""
+    if not os.path.exists(os.path.join(DECLINED_DBC, "DeclinedWord.dbc")):
+        print("build_ru: no DeclinedWord.dbc, declined Russian lines will stay Russian")
+        return {}
+    recs, text = read_dbc("DeclinedWord")
+    words = {r[0]: text(r[1]) for r in recs}
+    recs, text = read_dbc("DeclinedWordCases")
+    out = collections.defaultdict(dict)
+    for _, word, case, form in recs:
+        if word in words:
+            out[words[word]][case] = text(form)
+    return out
+
+
+def declined_forms(P, gs):
+    """Each declined form of a UI word / zone reads as that word's English. Named NPCs are left out (25k words, 5 forms each)."""
+    D = declined_words()
+    for dom in ("ui", "zones"):
+        inv = collections.defaultdict(dict)
+        for en, rus in P.d[dom].items():
+            for ru, c in rus.items():
+                if ru in D:
+                    inv[ru][en] = c
+        for base, ens in inv.items():
+            for case, form in D[base].items():
+                if form and form != base:
+                    for en, c in ens.items():                # 6+ are whole phrases; 1-5 can be another word («Сна»)
+                        P.add(dom, en, form, c if case >= 6 else 1)
+    # a skill the table lacks: its stat string has the same wording, or the client prints the plain name
+    names = {}
+    for r in tsv(os.path.join(ROOT, "out", "db2", "SkillLine.tsv")):
+        if len(r) >= 5 and r[1] == "DisplayName_lang" and r[3] and r[4]:
+            names.setdefault(r[3], r[4])
+    by_lower = {en.lower(): en for en in names}
+    for _, en, ru in gs:
+        me, mr = re.match(r"^Increases (.+?) skill by %s\.$", en), re.match(r"^Повышает навык (.+) на %s\.$", ru)
+        skill = me and mr and by_lower.get(me.group(1).lower())
+        if skill:
+            P.add("ui", skill, "Ваш навык " + mr.group(1), 9)
+    for en, ru in names.items():
+        for f in ('"%s"', "«%s»", "%s"):
+            P.add("ui", en, "Ваш навык " + f % ru, 4)
+    P.add("ui", "Riding", "Ваш навык верховой езды", 9)
+    # «|3-6(%2$s) |3-6(%1$s).» has no word of its own to match on ("Теперь в Оргриммаре относятся к вам с почтением."):
+    # one format per standing, its form being the fixed text. The damage lines («%s ед. |3-6(%s)») likewise, per school.
+    extra = []
+    schools = {"Fire": "Огонь", "Frost": "Лед", "Nature": "Природа", "Shadow": "Тьма", "Arcane": "Тайная магия", "Holy": "Свет"}
+    for key, en, ru in gs:
+        if en.endswith("%s Damage") and ru.endswith("|3-6(%s)"):
+            for school, word in schools.items():
+                form = D.get(word, {}).get(6)
+                if form:
+                    extra.append(("DECL_" + key, en[:-len("%s Damage")] + school + " Damage", ru[:-len("|3-6(%s)")] + form))
+    for key, en, ru in gs:
+        if re.fullmatch(r"FACTION_STANDING_LABEL[1-8]", key):
+            form = D.get(ru, {}).get(6)
+            if form:
+                extra.append(("DECL_" + key, "You are now %s with %%s." % en, "%%s %s." % form))
+    gs.extend(extra)
+
+
 def pair_gossip_by_npc(P, hp):
     """Forever gossip has no Russian source: a ruRU session harvests the lines it could not translate with the NPC (id
     on ruRU, core/ru.lua W.npc_key); the enUS harvest has the same NPC's English lines. An NPC with ONE Russian line and
@@ -586,6 +664,7 @@ def build(ru_desc=None, stats=False):
     for ru, en in RACES_F.items():
         P.add("ui", en, ru, 9)
     pair_gossip_by_npc(P, os.path.join(ROOT, "data", "harvest.json"))
+    declined_forms(P, gs)
     # item flavor texts are shown in quotes ("\"A small glowing stone…\""), the DB2 pairs have none (R670)
     for en in [e for e in T["ui"] if len(e) > 2 and e[0] == e[-1] == '"']:
         for ru, c in list(P.d["ui"].get(en[1:-1], {}).items()):
@@ -637,7 +716,7 @@ def build(ru_desc=None, stats=False):
                 cache_titles[r[0]] = r[1]
     rework = sorted(int(q) for q, t in qt.items()
                     if (cache_titles.get(q) or fv_titles.get(q)) and
-                    (cache_titles.get(q) or fv_titles.get(q)).strip().lower() != t.strip().lower())
+                    " ".join((cache_titles.get(q) or fv_titles.get(q)).split()).lower() != " ".join(t.split()).lower())
     L.append("WoWBY_QReworkRU = {%s}" % ",".join("[%d]=true" % q for q in rework))
     counts["reworked quests"] = len(rework)
     body = "\n".join(L) + "\n"

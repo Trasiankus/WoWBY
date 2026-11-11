@@ -39,7 +39,50 @@ local function units_be(v)
         return n .. " " .. b2
     end))
 end
-local function render_desc(key, text)
+-- Accusative of a place name after «у» (Hearthstone $z), R794: only the head noun and the adjectives before it change; the
+-- rest is usually genitive («Вёску Крывавага Капыта», not «Вёску Крывавагу Капыту»). Neuter heads and plurals stay as they are.
+local PLACE_NEUTER = {}
+for w in ("Логава Абацтва Возера Балота Узвышша Свяцілішча Сховішча Паселішча Месца Седала Узбярэжжа Лесарэчча Запамежжа Паўднёвабярэжжа Ранча Гнязда Храпава Два"):gmatch("%S+") do
+    PLACE_NEUTER[w] = true
+end
+local function place_acc(z)
+    local done = false
+    return (z:gsub("%S+", function(w)
+        if done then return w end
+        if w:find("ая$") then return (w:gsub("ая$", "ую")) end
+        if w:find("яя$") then return (w:gsub("яя$", "юю")) end
+        done = true
+        if PLACE_NEUTER[w] then return w end
+        -- ...ыя / ...ія = a plural adjective, except nouns like Лабараторыя, Кулінарыя, Станцыя
+        if (w:find("ыя$") or w:find("ія$")) and not (w:find("цыя$") or w:find("орыя$") or w:find("нарыя$")) then return w end
+        if w:find("а$") then return (w:gsub("а$", "у")) end
+        if w:find("я$") then return (w:gsub("я$", "ю")) end
+        return w
+    end))
+end
+W.place_acc = place_acc
+local render_desc, render_parts
+-- R809: a header + optional paragraphs in a fixed order (Camp Benefits: whichever camp objects you have). Every paragraph of
+-- the text must be consumed, or the whole text stays English.
+local function render_sections(key, dd, t0)
+    local s = dd.sections
+    local t = t0:gsub("%s+$", "") .. "\n\n"
+    local pos = t:match("^" .. s[1] .. "%s*()")
+    if not pos then return nil end
+    local pieces = {}
+    for i = 3, #s do
+        local c = { t:match("^" .. s[i][1] .. "%s*()", pos) }
+        if #c > 0 then
+            pos = table.remove(c)
+            local piece = render_parts(key, s[i][2], c)
+            if not piece then return nil end
+            pieces[#pieces + 1] = piece
+        end
+    end
+    if pos <= #t then return nil end
+    return s[2] .. table.concat(pieces, "\n\n")
+end
+function render_desc(key, text)
     local d = key and SD[key]
     -- ruRU client (R665): the RU templates' patterns into the same BE template first (data/ru.lua WoWBY_SpellDescRU)
     local dr = key and W.SD_RU and W.SD_RU[key]
@@ -50,11 +93,22 @@ local function render_desc(key, text)
     for _, dd in ipairs({ dr or false, d or false }) do
         for i = 1, dd and #dd or 0, 2 do
             local c = { t0:match(dd[i]) }
+            -- a description ending in a line break: cut_cooldown took that break off with the "(30 Min Cooldown)" (R795)
+            if #c == 0 then c = { (t0 .. "\n"):match(dd[i]) } end
             if #c > 0 then caps, parts = c, dd[i + 1]; break end
         end
         if caps then break end
     end
-    if not caps then return nil end
+    if not caps then
+        for _, dd in ipairs({ dr or false, d or false }) do
+            local r = dd and dd.sections and render_sections(key, dd, t0)
+            if r then return r end
+        end
+        return nil
+    end
+    return render_parts(key, parts, caps)
+end
+function render_parts(key, parts, caps)
     local out, female = {}, UnitSex("player") == 3
     for _, p in ipairs(parts) do
         local tp = type(p)
@@ -75,13 +129,7 @@ local function render_desc(key, text)
                 if not sub then return nil end
                 z = sub
             elseif z and (out[#out] or ""):find("[уў] $") then  -- after «у»: accusative of feminine words (у Жалезнакузню)
-                z = z:gsub("(%S+)", function(w)
-                    if w:find("ая$") then return (w:gsub("ая$", "ую")) end
-                    if w:find("яя$") then return (w:gsub("яя$", "юю")) end
-                    if w:find("а$") then return (w:gsub("а$", "у")) end
-                    if w:find("я$") then return (w:gsub("я$", "ю")) end
-                    return w
-                end)
+                z = W.place_acc(z)
             end
             out[#out + 1] = z or units_be(c)
         else out[#out + 1] = female and p[2] or p[1] end
@@ -99,6 +147,25 @@ local START_IDX
 -- patterns that OPEN with an embedded description ("^(.-) If you spend at least 10 sec eating…": Forever food =
 -- $@spelldesc433 + its own sentence, R279) have no first word: kept with the literal text after the capture
 local LEAD = {}
+-- item name by EN name, else by id; random suffix (R335): "Charger's Armor of Frost Protection" = base + «of …» → BE
+-- base + BE suffix (the id alone gives the BASE name, which dropped the suffix). Tooltips and chat links (R825).
+function W.item_name_be(en, id)
+    en = en or ""
+    local nm = W.IE[en] or (id and W.IT[id])
+    local base, suf = en:match("^(.-) (of .+)$")
+    local sbe = suf and WoWBY_Suffix and WoWBY_Suffix[suf]
+    if sbe and not W.IE[en] then
+        local bbe = W.IE[base] or (id and W.IT[id])
+        -- ў / у at the suffix start by the base's last letter (R351: «Боты ўхілення», «Шчыт ухілення»)
+        if bbe and (sbe:sub(1, 2) == "ў" or sbe:sub(1, 2) == "у") then
+            local last = bbe:match("([%z\1-\127\194-\244][\128-\191]*)$")
+            local vowel = last and ("аеёіоуыэюяАЕЁІОУЫЭЮЯ"):find(last, 1, true)
+            sbe = (vowel and "ў" or "у") .. sbe:sub(3)
+        end
+        nm = bbe and (bbe .. " " .. sbe) or nil
+    end
+    return nm
+end
 -- first words: English, or (ruRU client, R665) Russian — letters of either script
 local WORD = "[%a\208\209][%a'\128-\191\208\209]+"
 function W.desc_keys_by_start(text)
@@ -152,18 +219,18 @@ end
 local function xp_tail(body, tail)
     local core, n = (body or ""):match("^(.-)%s*Additionally, experience gained from kills is increased by (%d+)%%%.$")
     if not core then return body, tail end
-    return core, " Акрамя таго, вопыт, які атрымліваецца за забойствы, павялічваецца на " .. n .. "%." .. (tail or "")
+    return core, " Акрамя таго, досвед, які атрымліваецца за забойствы, павялічваецца на " .. n .. "%." .. (tail or "")
 end
 -- a whole drawn "Use: … (N Hr Cooldown)" line → BE, trying every description with the same literal start (R203)
 -- item spell lines by their rendered text: "Use:" and (R321) "Equip:" / "Chance on hit:" — an item whose spell id is not
 -- mapped (quiver "Equip: Increases ranged attack speed by 10%.") is matched by the description patterns
 local TRIGGERS = { { "^Use: (.+)$", "Ужыць: " }, { "^Equip: (.+)$", "Калі на персанажы: " },
-                   { "^Chance on hit: (.+)$", "Магчымы эфект пры трапленні: " } }
+                   { "^Chance on hit: (.+)$", "Магчымы эфект пры траплянні: " } }
 -- ruRU client (R665): the client's own trigger words («Использование:», «Если на персонаже:», …) from its GlobalStrings
 local function esc(s) return (s:gsub("%p", "%%%0")) end
 if W.RU then
     for g, be in pairs({ ITEM_SPELL_TRIGGER_ONUSE = "Ужыць: ", ITEM_SPELL_TRIGGER_ONEQUIP = "Калі на персанажы: ",
-                         ITEM_SPELL_TRIGGER_ONPROC = "Магчымы эфект пры трапленні: " }) do
+                         ITEM_SPELL_TRIGGER_ONPROC = "Магчымы эфект пры траплянні: " }) do
         local s = type(_G[g]) == "string" and _G[g]
         if s then TRIGGERS[#TRIGGERS + 1] = { "^" .. esc(s) .. " (.+)$", be } end
     end
@@ -276,21 +343,7 @@ if TooltipDataProcessor and Enum and Enum.TooltipDataType then
         if not (W.on("spells") and id and data.lines) then return end
         local l1 = data.lines[1]
         local en1 = l1 and plain(l1.leftText) or ""
-        local nm = W.IE[en1] or W.IT[id]                                     -- by EN name, else by id
-        -- random suffix (R335): "Charger's Armor of Frost Protection" = base + «of …» → BE base + BE suffix
-        -- (the id alone gives the BASE name, which dropped the suffix)
-        local base, suf = en1:match("^(.-) (of .+)$")
-        local sbe = suf and WoWBY_Suffix and WoWBY_Suffix[suf]
-        if sbe and not W.IE[en1] then
-            local bbe = W.IE[base] or W.IT[id]
-            -- ў / у at the suffix start by the base's last letter (R351: «Боты ўхілення», «Шчыт ухілення»)
-            if bbe and (sbe:sub(1, 2) == "ў" or sbe:sub(1, 2) == "у") then
-                local last = bbe:match("([%z\1-\127\194-\244][\128-\191]*)$")
-                local vowel = last and ("аеёіоуыэюяАЕЁІОУЫЭЮЯ"):find(last, 1, true)
-                sbe = (vowel and "ў" or "у") .. sbe:sub(3)
-            end
-            nm = bbe and (bbe .. " " .. sbe) or nil
-        end
+        local nm = W.item_name_be(en1, id)
         if nm and l1 then l1.leftText = nm end
         local sid = C_Item and C_Item.GetItemSpell and select(2, C_Item.GetItemSpell(id))
         if sid and tr_desc_lines(data.lines, SK[sid], use_prefix(), "Ужыць: ") then return end

@@ -209,7 +209,21 @@ W.IE = WoWBY_ItemsEN or {}
 local OBJ_VERBS = { slain = "Забіта", killed = "Забіта", destroyed = "Знішчана", defeated = "Пераможана",
                     rescued = "Выратавана", freed = "Вызвалена", captured = "Схоплена", burned = "Спалена",
                     cleansed = "Ачышчана", purified = "Ачышчана", banished = "Выгнана",
-                    exterminated = "Знішчана", eliminated = "Знішчана" }   -- R633: "0/8 Enchanted Skyhopper Exterminated"
+                    exterminated = "Знішчана", eliminated = "Знішчана",   -- R633: "0/8 Enchanted Skyhopper Exterminated"
+                    healed = "Вылечана", saved = "Выратавана", revived = "Ажыўлена", resurrected = "Уваскрэшана",
+                    slaughtered = "Забіта", vanquished = "Пераможана", subdued = "Утаймавана", tamed = "Прыручана",
+                    calmed = "Супакоена", fed = "Накормлена", awakened = "Абуджана", released = "Вызвалена" }
+                    -- R841: "0/5 Injured Deathguard healed"
+-- R846: "<action> <name>" objective lines (Lua patterns; longest first where one is a prefix of another)
+local OBJ_ACTIONS = { { "Offer aid to", "Дапамагчы" }, { "Talk to", "Паразмаўляць" }, { "Speak to", "Паразмаўляць" },
+                      { "Help", "Дапамагчы" }, { "Aid", "Дапамагчы" }, { "Rescue", "Выратаваць" }, { "Free", "Вызваліць" },
+                      { "Heal", "Вылечыць" }, { "Comfort", "Суцешыць" }, { "Protect", "Абараніць" }, { "Defend", "Абараніць" },
+                      { "Escort", "Суправаджаць" }, { "Locate", "Знайсці" }, { "Inspect", "Агледзець" },
+                      { "Examine", "Агледзець" }, { "Investigate", "Даследаваць" }, { "Kill", "Забіць" }, { "Slay", "Забіць" },
+                      { "Defeat", "Перамагчы" }, { "Report to", "Далажыць" }, { "Return to", "Вярнуцца" },
+                      { "Visit", "Наведаць" }, { "Greet", "Павітаць" }, { "Wake", "Абудзіць" }, { "Awaken", "Абудзіць" } }
+local LOC_VOWEL = {}            -- a name ending in a vowel takes «ў» (UTF-8: each Cyrillic letter is 2 bytes)
+for v in ("аеёіоуыэюя"):gmatch("[\208\209][\128-\191]") do LOC_VOWEL[v] = true end
 local function verb_line(cnt, word, be) return cnt .. " " .. word .. ": " .. be end
 local function obj_name(nm)
     -- WoWBY_Objectives: places / things from the translated harvest ("Darnassus Bank" in "0/1 Darnassus Bank")
@@ -253,6 +267,29 @@ function obj_be_core(t)
     if fw then
         local wb = obj_name(fw) or obj_name((fw:gsub("^the ", "")))
         if wb then return verb_line(cnt, "Знайсці", wb) end
+    end
+    -- R846: "0/1 Offer aid to the Frightened Paladin" → «0/1 Дапамагчы: Спалоханы паладзін» (same shape)
+    if not be then
+        for _, v in ipairs(OBJ_ACTIONS) do
+            local nm = body:match("^" .. v[1] .. " (.+)$")
+            local wb = nm and (obj_name(nm) or obj_name((nm:gsub("^the ", ""))) or obj_name((nm:gsub("^the (%l)", string.upper))))
+            if wb then return verb_line(cnt, v[2], wb) end
+            -- "Report to Shari Stilwell in Brill" → «Далажыць: Шары Стылвел (Брыл)»
+            local n2, zn
+            if nm then n2, zn = nm:match("^(.+) in (.+)$") end
+            local zb = zn and ((W.Z or {})[zn] or (WoWBY_POI or {})[zn] or obj_name(zn))
+            wb = zb and (obj_name(n2) or obj_name((n2:gsub("^the ", ""))))
+            if wb then
+                -- R854: «Шары Стылвел у Брыле» where the build learned the locative from our texts, else «(Брыл)»
+                local zl = (WoWBY_ZoneLoc or {})[zn]
+                if zl then
+                    local prep = zl[1]
+                    if prep == "у" and LOC_VOWEL[wb:sub(-2)] then prep = "ў" end
+                    return verb_line(cnt, v[2], wb .. " " .. prep .. " " .. zl[2])
+                end
+                return verb_line(cnt, v[2], wb .. " (" .. zb .. ")")
+            end
+        end
     end
     -- "Use Walk on Air: 1/1" (R436): the ability by its spell name, same impersonal shape
     local sp = not be and body:match("^Use (.+)$")
@@ -326,7 +363,7 @@ local REWARD_MAP = {
     ["You will also receive:"]                           = "Вы атрымаеце таксама:",
     ["You will be able to choose one of these rewards:"] = "Вы зможаце выбраць адну з гэтых узнагарод:",
     ["Choose one of these rewards:"]                     = "Выберыце адну з гэтых узнагарод:",
-    ["Experience:"]                                      = "Вопыт:",
+    ["Experience:"]                                      = "Досвед:",
 }
 if W.ru_alias then W.ru_alias(REWARD_MAP, "ui") end         -- ruRU client: the Russian labels (R665)
 local function tr_reward_fs(fs)
@@ -355,6 +392,7 @@ function W.hook_npc_titles()
         if fs then hooksecurefunc(fs, "SetText", function(self) pcall(npc_title_fs, self) end) end
     end
 end
+local reward_hooked, reward_busy = setmetatable({}, { __mode = "k" }), false   -- R911: reward-name FontString hooks
 local function quest_info_post()
     local log = QuestInfoFrame and QuestInfoFrame.questLog
     local qid = log and C_QuestLog.GetSelectedQuest() or (GetQuestID and GetQuestID())
@@ -377,7 +415,19 @@ local function quest_info_post()
     if W.on("spells") then                       -- item names on the buttons (by EN name, WoWBY_ItemsEN)
         local function tr_btn(btn)
             local fs = btn and (btn.Name or (btn.GetName and btn:GetName() and _G[btn:GetName() .. "Name"]))
-            local t = fs and fs.GetText and plain(fs:GetText())
+            if not fs then return end
+            -- R911 (QA screenshot 2026-11-11: «Mining for Dummies» etc. stayed English on the reward buttons): Blizzard
+            -- sets the name inside Item:ContinueOnItemLoad, i.e. LATER for an item not cached yet — after this pass. So
+            -- each reward / progress name FontString also gets a SetText post-hook (once) that swaps the late name.
+            if not reward_hooked[fs] and fs.SetText then
+                reward_hooked[fs] = true
+                hooksecurefunc(fs, "SetText", function(self)
+                    if reward_busy or not (W.is_be() and W.on("spells")) then return end
+                    local s = plain(self:GetText()); local b = s and W.IE[s]
+                    if b then reward_busy = true; pcall(W.set_font, self); pcall(W.swap, self, b); reward_busy = false end
+                end)
+            end
+            local t = fs.GetText and plain(fs:GetText())
             local be = t and W.IE[t]
             if be then W.set_font(fs); W.swap(fs, be) end
         end
@@ -475,10 +525,18 @@ local function log_obj_hook(ob)
     return true
 end
 local log_rerun = false
+-- R811: Forever's row tag "(Dungeon)" (QuestUtilsOverrides.GetQuestTagText: Elite / Dungeon / PvP / Raid in brackets)
+function W.quest_tag_be(t)
+    local inner = t and t:match("^%((.+)%)$")
+    local be = inner and W.ui_be(inner)
+    return be and be ~= inner and ("(" .. be .. ")") or nil
+end
 local function log_list_post()
     if not (W.is_be() and QuestScrollFrame and QuestScrollFrame.titleFramePool) then return end
     local grew = false
     for button in QuestScrollFrame.titleFramePool:EnumerateActive() do
+        local tag = button.TagText and button.TagText:IsShown() and W.quest_tag_be(plain(button.TagText:GetText()))
+        if tag then W.swap(button.TagText, tag) end
         if button.questID and button.Text and W.be_title(button.questID) then
             local before = button.Text:GetStringHeight() or 0
             W.swap_title(button.Text, button.questID)
@@ -540,18 +598,43 @@ local function trk_hook(fs, qid, header)
     end
     info.qid, info.header = qid, header                   -- pooled lines move between quests: keep current
 end
+-- R832 (owner 2026-11-08, screenshot: tracker «0/8 Рыла баявога дзіка» while the unit tooltip said 6/8): a looted item
+-- did not always redraw the tracker. Every 2 s out of combat each visible tracker objective line is compared with the
+-- live leaderboard text (the same getter Blizzard's tracker uses) and re-set when it is behind; our SetText hook then
+-- translates it. Display-only: only the FontString's text, never a Blizzard tracker update (taint, R156).
+local function trk_refresh()
+    if InCombatLockdown() or not (W.is_be() and W.on("quests")) or not GetQuestLogLeaderBoard then return end
+    for fs, info in pairs(trk_fs) do
+        if not info.header and info.qid and type(info.key) == "number" and fs:IsVisible() then
+            local idx = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(info.qid)
+            local live = idx and plain((GetQuestLogLeaderBoard(info.key, idx)))
+            local cur = plain(fs:GetText())
+            -- up to date = the line shows the live English, or our translation of it
+            if live and live ~= "" and cur and cur ~= live and obj_en[fs] ~= live then pcall(fs.SetText, fs, live) end
+        end
+    end
+end
+C_Timer.NewTicker(2, function() pcall(trk_refresh) end)
 local function tracker_post(module)
     if not (W.is_be() and module and module.usedBlocks) then return end
     for _, blocks in pairs(module.usedBlocks) do
         for id, block in pairs(blocks) do
             local qid = type(id) == "number" and id or nil
             if qid and block.HeaderText then trk_hook(block.HeaderText, qid, true); W.swap_title(block.HeaderText, id) end
-            for _, line in pairs(block.usedLines or {}) do
+            for key, line in pairs(block.usedLines or {}) do
                 trk_hook(line.Text, qid, false)
+                if trk_fs[line.Text] then trk_fs[line.Text].key = key end
                 tr_obj_fs(line.Text, qid)
             end
         end
     end
+end
+-- R889: re-text the tracker after a language switch WITHOUT running Blizzard's tracker update from addon code (that ran
+-- the whole update tainted → ShouldShowMawBuffs errored → the quest module was never laid out: finished quests stayed
+-- «8/8» without the turn-in line, owner 2026-11-11)
+function W.tracker_retext()
+    for _, m in ipairs({ _G.QuestObjectiveTracker, _G.CampaignQuestObjectiveTracker }) do pcall(tracker_post, m) end
+    if W.tr_tracker_headers then pcall(W.tr_tracker_headers) end
 end
 for _, m in ipairs({ _G.QuestObjectiveTracker, _G.CampaignQuestObjectiveTracker }) do
     -- pcall (R741, owner screenshot 2026-10-23: an abandoned quest stayed in the tracker until the language switch):

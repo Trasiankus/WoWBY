@@ -11,7 +11,7 @@ local UI_HAND = {
     -- spell subtexts (Spell NameSubtext, R380, owner)
     ["Racial"] = "Расавае", ["Elemental Combat"] = "Стыхійны бой", ["Narrator"] = "Апавядальнік", ["Shadow Magic"] = "Магія цемры", ["Racial Passive"] = "Расавае пасіўнае",
     ["Back"] = "Назад",   -- buttons (quest details "Back"); the cloak slot in item tooltips = «Спіна» (tooltip_line_be)
-    ["(Alliance Territory)"] = "(Тэрыторыя Альянса)", ["(Horde Territory)"] = "(Тэрыторыя Арды)",   -- owner
+    ["(Alliance Territory)"] = "(Тэрыторыя Альянсу)", ["(Horde Territory)"] = "(Тэрыторыя Арды)",   -- owner
     ["(Contested Territory)"] = "(Спрэчная тэрыторыя)",
     ["AddOns"] = "Дадаткі", ["Addons"] = "Дадаткі", ["Edit Mode"] = "Рэжым рэдагавання",
     ["Ratings"] = "Адзнакі", ["Support"] = "Падтрымка", ["Help"] = "Дапамога",
@@ -24,7 +24,7 @@ local UI_HAND = {
     Shapeshift = "Змена аблічча",                         -- spell subtext (trainer requirements: "Bear Form (Shapeshift)")
     -- container subtypes (ItemSubClass, "4 Slot Leatherworking Bag" = CONTAINER_SLOTS, R298); forms as the bag items
     ["Soul Bag"] = "Торба душ", ["Herb Bag"] = "Торба для траў", ["Enchanting Bag"] = "Торба для зачаравання",
-    ["Engineering Bag"] = "Інжынерная торба", ["Mining Bag"] = "Торба для горнай справы",
+    ["Engineering Bag"] = "Інжынерная торба", ["Mining Bag"] = "Торба для гарняцтва",
     ["Leatherworking Bag"] = "Торба для скур", ["Cooking Bag"] = "Торба для прадуктаў",
     ["Reagent Bag"] = "Торба для рэагентаў", ["Trinket Bag"] = "Торба для аксесуараў",
     ["Tackle Box"] = "Скрыня для рыбацкіх снасцей", ["Ammo Pouch"] = "Падсумак",
@@ -42,15 +42,27 @@ local UI_HAND = {
     ["Repair All"] = "Адрамантаваць усё", Trade = "Абмен", Learn = "Вывучыць", Reset = "Скінуць",
     Apply = "Ужыць", Defaults = "Па змаўчанні", Save = "Захаваць", Create = "Стварыць", Send = "Адправіць",
     Reply = "Адказаць", Inspect = "Агледзець", Invite = "Запрасіць", Ignore = "Ігнараваць",
-    Level = "Узровень", Strength = "Сіла", Agility = "Спрытнасць", Stamina = "Целабудова",
+    Level = "Узровень", Strength = "Сіла", Agility = "Спрытнасць", Stamina = "Вынослівасць",
     Intellect = "Інтэлект", Spirit = "Дух", Armor = "Браня", Health = "Здароўе", Mana = "Мана",
     Reputation = "Рэпутацыя", Skills = "Навыкі", Currency = "Валюта", Titles = "Званні",
     Buyback = "Выкуп", Bank = "Банк", Inbox = "Уваходныя", ["Take All"] = "Узяць усё",
     Beast = "Звер", Dragonkin = "Драканід", Demon = "Дэман", Elemental = "Элементаль",
-    Giant = "Велікан", Humanoid = "Гуманоід", Critter = "Звярок", Mechanical = "Механізм", Totem = "Татэм",
+    Giant = "Волат", Humanoid = "Гуманоід", Critter = "Звярок", Mechanical = "Механізм", Totem = "Татэм",
     Elite = "Эліта", Rare = "Рэдкі", ["Rare Elite"] = "Рэдкая эліта", Boss = "Бос",   -- owner: (Эліта)
+    -- Battle.net friend's rich presence (server text, R929): a friend in the launcher app
+    ["In App"] = "У праграме",
 }
 for en, be in pairs(UI_HAND) do W.UI[en] = be end
+-- "Must have a Fishing Pole equipped" (SPELL_FAILED_EQUIPPED_ITEM_CLASS*, R918 owner 2026-11-11: «Вы павінны трымаць у
+-- руцэ Вуда» read badly): whole lines with the weapon type in the accusative; other types use the format's «…: %s»
+local EQUIP_ACC = { ["Fishing Pole"] = "вуду", Axe = "сякеру", Bow = "лук", Gun = "стрэльбу", Mace = "булаву",
+    Polearm = "дрэўкавую зброю", Sword = "меч", Staff = "посах", ["Fist Weapon"] = "кісцевую зброю", Dagger = "кінжал",
+    Shield = "шчыт", Thrown = "кідальную зброю", Wand = "жазло", Crossbow = "арбалет" }
+for en, acc in pairs(EQUIP_ACC) do
+    W.UI["Must have a " .. en .. " equipped"] = "Трэба ўзяць у рукі " .. acc
+    W.UI["Must have a " .. en .. " equipped in the main hand"] = "Трэба ўзяць у правую руку " .. acc
+    W.UI["Must have a " .. en .. " equipped in the offhand"] = "Трэба ўзяць у другую руку " .. acc
+end
 for en, be in pairs(W.CLASSES) do W.UI[en] = W.UI[en] or be end
 for en, pair in pairs(W.RACES) do W.UI[en] = W.UI[en] or pair[1] end
 W.current_tooltip_female = false
@@ -64,6 +76,7 @@ function W.ui_val(v)                                 -- "Druid" or "|cffff7c0aDr
         if W.RACES[v] then return W.RACES[v][2] end
         if W.CLASSES_FEM[v] then return W.CLASSES_FEM[v] end
     end
+    if W.player_race_line and W.RACES[v] then return W.RACES[v][1] end
     if W.UI[v] then return W.UI[v] end
     local c, inner, r = v:match("^(|c%x%x%x%x%x%x%x%x)(.-)(|r)$")
     if inner then
@@ -100,6 +113,20 @@ W.plural_forms = plural_forms
 local RAW_FMT = { ["^(.-) Tab$"] = true }
 -- a capture that is a list of names ("Requires %s" = "Bear Form, Dire Bear Form", R288): every piece must be a known
 -- spell / item / UI name, else nil (the line stays English)
+-- R923: profession tool links have no [ ]: "|HSpellFocusRequirement|hForge|h" (Totem / Area requirements too), one or
+-- a ", " list, each maybe in red → every shown name swapped (UI word / item / spell / zone), else nil
+function W.req_links_be(c)
+    local miss = false
+    local out = c:gsub("(|H%a+Requirement[^|]*|h)([^|]+)(|h)", function(a, nm, b)
+        local be = W.UI[nm] or (W.on("spells") and (W.IE[nm] or W.spell_name_be(nm))) or (W.on("zones") and W.Z[nm])
+        if not be then miss = true; return nil end
+        return a .. be .. b
+    end)
+    if miss or out == c then return nil end
+    -- nothing else but colours and ", " may remain outside the links
+    local rest = out:gsub("|H.-|h.-|h", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|cn[%w_]+:", ""):gsub("|r", "")
+    return rest:find("^[%s,]*$") and out or nil
+end
 local function name_list_be(c)
     if not c:find(", ", 1, true) or c:find("|", 1, true) then return nil end
     local parts = {}
@@ -124,8 +151,26 @@ local function stat_list_be(c)
     end
     return table.concat(parts, " і ")
 end
-W.CHAT_TAB_BE = { General = "Агульнае", ["Combat Log"] = "Журнал бою" }
+W.CHAT_TAB_BE = { General = "Агульнае", ["Combat Log"] = "Журнал бою", Voice = "Голас",
+                  -- R912 (QA 2026-11-11): a character created on a Russian client keeps the Russian default tab names
+                  -- in its saved chat settings, also after switching to enUS → translate those too
+                  ["Общий"] = "Агульнае", ["Общее"] = "Агульнае", ["Журнал боя"] = "Журнал бою", ["Голос"] = "Голас" }
 if W.ru_alias then W.ru_alias(W.CHAT_TAB_BE, "ui") end      -- ruRU client: «Общий», «Журнал боя» (R665)
+-- SecondsToTime text, every unit known or nil: "54 Min 29 Sec", on a ruRU client "4 мин. 46 с."
+local DURATION = { sec = "сек.", secs = "сек.", min = "хв.", mins = "хв.", hr = "гадз.", hrs = "гадз.", hour = "гадз.", hours = "гадз.",
+                   day = "д", days = "д", c = "сек.", ["с"] = "сек.", ["сек"] = "сек.", ["мин"] = "хв.", ["ч"] = "гадз.", ["час"] = "гадз.",
+                   ["д"] = "д", ["дн"] = "д" }
+function W.duration_be(s)
+    local rest, out = s:gsub("\194\160", " "), {}
+    while rest ~= "" do
+        local n, u, tail = rest:match("^(%d+) ([^%d%s%.]+)%.?%s*(.*)$")
+        local b = u and (DURATION[u] or DURATION[u:lower()])
+        if not b then return nil end
+        out[#out + 1] = n .. " " .. b
+        rest = tail
+    end
+    return #out > 0 and table.concat(out, " ") or nil
+end
 local ui_fmt
 function ui_fmt(t, depth)
     depth = depth or 0
@@ -147,17 +192,25 @@ function ui_fmt(t, depth)
                 local raw = RAW_FMT[d[1]]
                 for i, c in ipairs(caps) do
                     if type(c) ~= "string" then c = tostring(c) end
-                    local v = raw and (W.CHAT_TAB_BE[c] or c) or W.ui_val(c)
+                    -- R819: a line whose names are only ever PLAYERS (messages PLAYER_FMT_KEYS): a name is kept even
+                    -- when an NPC has it (a player "Bob" had become «Карэ»); money / links have digits or "|"
+                    local pname = W.player_names and depth == 0 and c:find("^%u") and #c <= 48 and not c:find("[|%d]")
+                        and not c:find("%s%S+%s%S+%s")
+                    local v = pname and c or raw and (W.CHAT_TAB_BE[c] or c) or W.ui_val(c)
                     if v == c then
                         -- already Belarusian = Cyrillic and NO Latin words: a half-translated capture
                         -- («Патрабуецца: Bear Form, Dire Bear» on the 2nd tooltip pass) is not "known" (R18)
-                        if c == "" or is_value(c) or c:find("^%x%x%x%x%x%x%x%x$")
+                        if pname then
+                            v = (W.emote_names and W.on("names") and W.N[c]) or c   -- "You wave at Guard Roberts."
+                        elseif c == "" or is_value(c) or c:find("^%x%x%x%x%x%x%x%x$")
                             or (W.ours(c) and not c:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|[rHhT][^|]*", ""):find("[A-Za-z][A-Za-z]")) then
                             v = c
                         elseif W.N[c] or W.Z[c] then
                             v = W.N[c] or W.Z[c]
                         elseif (WoWBY_Factions or {})[c] then
                             v = WoWBY_Factions[c]                      -- "Reputation with High Order increased by 100." (R454)
+                        elseif c:find("Requirement[^|]*|h") and W.req_links_be(c) then
+                            v = W.req_links_be(c)                      -- "Anvil, Blacksmith Hammer" tool links (R923)
                         elseif c:find("^|c.-|H.-|h.-|h|r$") or c:find("^|H.-|h.-|h$") then
                             -- item/spell link (colour may be |cffRRGGBB or the new |cnIQ1:): kept; the item's shown
                             -- name inside [ ] is swapped when we know it (display only, the link data is untouched)
@@ -165,6 +218,7 @@ function ui_fmt(t, depth)
                                 local be = W.on("spells") and W.IE[nm]
                                 return be and (a .. be .. b) or nil
                             end)
+                            v = W.req_links_be(v) or v
                         -- exact names BEFORE nested formats (R742: "Choker of the Fire Lord" in the destroy popup was
                         -- read as TITLE_TEMPLATE "%s of the %s" → «Choker з Fire Lord»)
                         elseif W.qtitle_be and W.qtitle_be(c) then
@@ -172,6 +226,8 @@ function ui_fmt(t, depth)
                         elseif W.on("spells") and (W.IE[c] or W.spell_name_be(c)) then
                             -- plain item / spell / recipe name ("You have learned how to create a new item: %s.", R24)
                             v = W.IE[c] or W.spell_name_be(c)
+                        elseif WoWBY_Skills and WoWBY_Skills[c] then
+                            v = WoWBY_Skills[c]                        -- "Your skill in Riding has increased to 75." (R803)
                         elseif depth < 2 and ui_fmt(c, depth + 1) then
                             v = ui_fmt(c, depth + 1)                 -- "4 Copper" inside "You loot %s"
                         elseif name_list_be(c) then
@@ -191,7 +247,7 @@ function ui_fmt(t, depth)
                         elseif stat_list_be(c) then
                             v = stat_list_be(c)                        -- enchant "Stamina +1 and Armor +8" (R364)
                         elseif ((W.any_name and depth == 0) or d[1]:find("ollowing", 1, true) or d[1]:find("stop moving to attack", 1, true))
-                            and #c <= 48 and not c:find("|", 1, true) and not c:find("%s%S+%s%S+%s") then
+                            and #c <= 48 and not c:find("|", 1, true) and not c:find("%s%S+%s%S+%s") and not c:find("^%l") then
                             v = c                                      -- emote: a player's name, kept as is
                         else
                             known = false; break
@@ -251,6 +307,15 @@ function ui_be_core(t)
     -- … and zone names (map nav bar, zone dropdown, area label) — the C_Map wraps are gone too
     if not be and W.on("zones") then be = W.Z[t] or W.Z[W.strtrim(t)] end
     if be then return cap_like(t, be) end
+    -- R863 (owner screenshot: trainer «Цюлень з Крыжак»): a whole spell name wins over the format templates — TITLE_TEMPLATE
+    -- "%s of the %s" + the UI word Seal (the animal) had built it before the trainer hook could set «Пячатка крыжака»
+    if W.spell_name_be and W.on("spells") and t:find(" ", 1, true) then
+        local sb = W.spell_name_be(t)
+        if sb then return sb end
+        local base, rk = t:match("^(.-) %(Rank (%d+)%)$")
+        sb = base and W.spell_name_be(base)
+        if sb then return sb .. " (ранг " .. rk .. ")" end
+    end
     -- item resistance line "+8 Fire Resistance" (ITEM_RESIST_SINGLE builds it from a bare school word) -> the school in
     -- the DATIVE like the stat names: «+8 да супраціўлення агню» (owner 2026-10-01; was «… супраціўлення: агонь»)
     local sign, school, close = t:match("^([%+%-]%d+) (%a+) Resistance(|?r?)$")
@@ -281,15 +346,17 @@ function ui_be_core(t)
     end
     -- item cooldown "Cooldown remaining: 54 Min 29 Sec" (R215): a composite of units, not one format capture
     local rest = t:match("^Cooldown remaining: (.+)$")
-    if rest then
-        local U = { sec = "сек.", min = "хв.", hr = "гадз.", hour = "гадз.", hours = "гадз.", day = "д", days = "д" }
-        local ok_all = true
-        local out = rest:gsub("(%d+) (%a+)", function(n, u)
-            local b = U[u:lower()]
-            if not b then ok_all = false end
-            return b and (n .. " " .. b) or nil
-        end)
-        if ok_all and not out:find("[A-Za-z][A-Za-z]") then return "Да аднаўлення: " .. out end
+    local dur = rest and W.duration_be(rest)
+    if dur then return "Да аднаўлення: " .. dur end
+    -- quest timer (R810): the log's "Time Remaining: 4 Min 49 Sec", the timer box's bare "4 Min 46 Sec"; both redrawn all the time
+    local label = _G.TIME_REMAINING
+    if type(label) == "string" and t:sub(1, #label + 1) == label .. " " then
+        dur = W.duration_be(t:sub(#label + 2))
+        if dur then return "Засталося часу: " .. dur end
+    end
+    if t:find("^%d+ %S+ %d+ %S") then
+        dur = W.duration_be(t)
+        if dur then return dur end
     end
     -- "<place>, <zone>" (flight map nodes the build had no text for, e.g. new Forever zones): both parts known zones
     local pa, pb = t:match("^([^,]+), ([^,]+)$")
@@ -319,7 +386,11 @@ end
 -- texts Blizzard joins with a blank line ("%s\n\n%s": the Spirit tooltip + SPIRIT_STANDING_WARNING, R535): when the
 -- whole text is unknown, each split at a "\n\n" is tried — the left part known, the right part known (it may split again)
 function W.ui_be(t, depth)
+    -- R932: "Level 7 Undead (Player)" — the word is the player's RACE (Навец / Наўка), not the creature type «Наўе»
+    local prl = W.player_race_line
+    if type(t) == "string" and not prl then W.player_race_line = t:find("(Player)", 1, true) ~= nil end
     local be = ui_be_one(t)
+    W.player_race_line = prl
     if be or type(t) ~= "string" then return be end
     depth = depth or 0
     local p = depth < 4 and plain(t)
@@ -336,8 +407,13 @@ function W.ui_be(t, depth)
 end
 local ui_en = setmetatable({}, { __mode = "k" })       -- FontString -> original EN (for switching back)
 function W.label_be(t)                               -- UI string, else an exact zone name (map nav bar)
-    return W.ui_be(t) or (W.on("zones") and W.Z[t])
+    local be = W.ui_be(t) or (W.on("zones") and W.Z[t])
         or (W.channel_be and t:find("^%d+%.") and W.channel_be(t)) or nil
+    if be then return be end
+    -- an icon before the label: friends status menu "|T…StatusIcon-Online.tga:16:16:0:0|t Online" (R929)
+    local icon, rest = t:match("^(|[TA].-|[ta]%s*)(.+)$")
+    local rb = rest and W.ui_be(rest)
+    return rb and (icon .. rb) or nil
 end
 -- inside the profession window only (owner 2026-09-28): recipe / item names, reagent lines "0/1 Soul Dust",
 -- "Requires: Runed Silver Rod", "Light Armor Kit [2]", the recipe description (by the selected recipe's spell id).
@@ -382,6 +458,11 @@ local function prof_be(t)
         end
         return (W.ui_be("Requires:") or "Requires:") .. " " .. table.concat(parts, ", ")
     end
+    -- coloured label ("|cffffd100Requires:|r Forge", R923) / pieces in red when the tool is missing
+    if W.req_list_be then
+        local rq = W.req_list_be(t)
+        if rq then return rq end
+    end
     local sf = _G.ProfessionsFrame and ProfessionsFrame.CraftingPage and ProfessionsFrame.CraftingPage.SchematicForm
     local info = sf and (sf.currentRecipeInfo or (sf.GetRecipeInfo and sf:GetRecipeInfo()))
     local rid = info and W.sid_ok(info.recipeID)
@@ -418,10 +499,10 @@ function W.hook_recipe_tracker()
 end
 -- chat language menu (R110): languages as adjectives of «мова» (owner: Оркская, Траліная); menus only, because the same
 -- EN words are races elsewhere ("Troll" = «Троль»)
-local LANG = { Orcish = "Оркская", Darnassian = "Дарнаская", Taurahe = "Таўраэ", Dwarvish = "Дварфійская",
+local LANG = { Orcish = "Орцкая", Darnassian = "Дарнаская", Taurahe = "Таўраэ", Dwarvish = "Дварфійская",
                Common = "Агульная", Demonic = "Дэманічная", Titan = "Тытанічная", Thalassian = "Талаская",
-               Draconic = "Драконья", Kalimag = "Калімаг", Gnomish = "Гномская", Troll = "Траліная",
-               Gutterspeak = "Мова нежыці", Pandaren = "Пандарэнская", ["Shen'dorei"] = "Шэн'дарэйская" }
+               Draconic = "Драконавая", Kalimag = "Калімаг", Gnomish = "Гномская", Troll = "Траліная",
+               Gutterspeak = "Наўская", Pandaren = "Пандарэнская", ["Shen'dorei"] = "Шэн'дарайская" }
 if W.ru_alias then W.ru_alias(LANG, "ui") end         -- ruRU client: Russian language names (R665)
 W.LANG = LANG                                         -- also the "You are fluent in…" spell lists (tooltips, R387)
 local fs_ctx = setmetatable({}, { __mode = "k" })     -- FontString -> "prof" (profession window) / "names" (Legacy window)
@@ -476,6 +557,8 @@ function W.retext_fs(fs, no_font)                    -- no_font: menu regions (S
             -- item names, battle pets NPC names («Міні-Дыябла»)
             or (fs_ctx[fs] == "collections" and (item_or_spell(t) or (W.on("names") and W.N[t])))
         W.current_tooltip_female = false
+        -- friends / recent allies rows (R927, owner): "Level 32 Shaman" was cut to «Узр.... Шаман» → «Узр. 32 Шаман»
+        if be and (fs_ctx[fs] == "friends" or W.friend_row_fs == fs) then be = be:gsub("^Узровень (%d)", "Узр. %1") end
         if be and be ~= t then
             ui_en[fs] = t
             if not no_font then W.set_font(fs) end
@@ -580,6 +663,7 @@ local PANELS = { "SettingsPanel", "CharacterFrame", "FriendsFrame", "MerchantFra
                  "CollectionsJournal", "AchievementFrame", "EncounterJournal", "TradeFrame", "HelpFrame",
                  "MacroFrame", "GossipFrame", "ContainerFrameCombinedBags", "LootFrame", "TaxiFrame",
                  "GuildRegistrarFrame", "TabardFrame",           -- R638: guild charter / tabard (strings were in the dict)
+                 "GuildInviteFrame",                         -- R892: guild invite popup (Join Guild / Decline Invitation)
                  "ClassTrainerFrame", "InspectFrame", "GuildBankFrame", "AuctionHouseFrame", "CalendarFrame",
                  "TimeManagerFrame", "StopwatchFrame",                       -- clock settings (load-on-demand)
                  "ProfessionsFrame",                         -- crafting window (load-on-demand; names via prof_be)
@@ -597,6 +681,7 @@ local PANELS = { "SettingsPanel", "CharacterFrame", "FriendsFrame", "MerchantFra
                  "NPE_TutorialKeyboardMouseFrame_Frame", "NPE_TutorialInterfaceHelp",
                  "PingSystemTutorial",                       -- R701: "Press the Ping key…" tutorial window
                  "ActionStatus",                             -- R712: "Screen Captured" (screenshot notice)
+                 "QuestTimerFrame", "QuestInfoTimerFrame",   -- R810: the timer box above the tracker, "Time Remaining:" in the log
                  -- R740: barbershop (load-on-demand): option labels "Hair Style" / "Beard" and the selected style name
                  -- (ChrCustomization* / BarberShopStyle via the UI dictionary; the style lists are Blizzard_Menu rows)
                  "BarberShopFrame", "CharCustomizeFrame",
@@ -609,7 +694,8 @@ function W.resolve(path)
 end
 function W.run_panel(frame, hidden_ok)               -- walks the tree: hooks new FontStrings, translates them
     local ctx = frame and (frame == _G.ProfessionsFrame and "prof" or frame == _G.LegacySystemFrame and "names"
-                           or frame == _G.CollectionsJournal and "collections") or nil
+                           or frame == _G.CollectionsJournal and "collections"
+                           or frame == _G.FriendsFrame and "friends") or nil
     if frame and frame.IsForbidden and frame:IsForbidden() then return end          -- R243: forbidden frames
     if frame and (hidden_ok or frame:IsShown()) and not InCombatLockdown() then retext_tree(frame, ctx) end
 end
@@ -683,6 +769,32 @@ local function hook_prof_buttons()
     if prof_btn_hooked or not (page and page.ValidateControls) then return end
     prof_btn_hooked = true
     hooksecurefunc(page, "ValidateControls", function(self) pcall(tr_prof_buttons, self) end)
+    -- R924 (owner: the "special tool" tooltip over «Патрабуецца: Крэмень і трут» vanished at once): Blizzard re-sets
+    -- the tools line on every Update; EN → our BE is a text change, the engine drops the hovered link (OnHyperlinkLeave
+    -- → tooltip hidden). The form is a plain frame: re-open the tooltip next frame while the mouse is still on that line.
+    local sf = page.SchematicForm
+    if sf and sf.HookScript and sf.OnHyperlinkEnter then
+        local last
+        sf:HookScript("OnHyperlinkEnter", function(_, ...) last = { ... } end)
+        sf:HookScript("OnHyperlinkLeave", function(self)
+            local a = last
+            if not a then return end
+            C_Timer.After(0, function()
+                local fs, left, width = a[3], tonumber(a[4]), tonumber(a[6])
+                local over = fs and fs.IsMouseOver and fs:IsVisible() and fs:IsMouseOver()
+                if over and left and width and fs:GetLeft() then
+                    -- still on the LINK part (not the «Патрабуецца:» label): a real leave must not re-open it
+                    local x = GetCursorPosition() / fs:GetEffectiveScale() - fs:GetLeft()
+                    over = x >= left - 2 and x <= left + width + 2
+                end
+                if over and not GameTooltip:IsShown() then
+                    pcall(self.OnHyperlinkEnter, self, unpack(a))
+                else
+                    last = nil
+                end
+            end)
+        end)
+    end
     -- linked profession title "Enchanting |cffffffff[Nitamina]|r" (R373): TRADE_SKILL_TITLE + the player's name in white
     -- → the profession part swapped, the name kept
     if ProfessionsFrame.SetTitle then

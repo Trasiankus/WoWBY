@@ -322,6 +322,25 @@ function W.safe(name, ...)
         if geterrorhandler then geterrorhandler()(err) end
     end
 end
+-- R856 (owner 2026-11-09: a finished objective left the tracker block un-redrawn): the game hides Lua errors, so errors
+-- that name WoWBY, taint or the objective tracker are also kept in WoWBY_DB.blizz_errors (last 30, with a short stack;
+-- each distinct message once per session). The previous handler still runs.
+if seterrorhandler and geterrorhandler then
+    local prev, seen = geterrorhandler(), {}
+    seterrorhandler(function(msg, ...)
+        pcall(function()
+            local m = tostring(msg)
+            if seen[m] or not WoWBY_DB then return end
+            if not (m:find("WoWBY") or m:find("taint") or m:find("ObjectiveTracker") or m:find("secret")) then return end
+            seen[m] = true
+            WoWBY_DB.blizz_errors = WoWBY_DB.blizz_errors or {}
+            local e = WoWBY_DB.blizz_errors
+            table.insert(e, 1, date("%Y-%m-%d %H:%M ") .. m .. "\n" .. ((debugstack and debugstack(3, 8, 6)) or ""))
+            for i = #e, 31, -1 do e[i] = nil end
+        end)
+        if prev then return prev(msg, ...) end
+    end)
+end
 -- ---------- harvest: collect what the game shows that WoWBY can't translate yet ----------
 -- Stored per client locale in WoWBY_DB.harvest[locale] (enUS gives source text, ruRU gives references);
 -- read out by tools/import_harvest.py. OFF by default since R677 (owner 2026-10-20: players don't need it); switch in
@@ -367,11 +386,55 @@ function W.harvest_quest(qid, field, text)
     -- the player's name / race / class back to $N / $R / $C, like gossip (R485: "Thank you …, Sparkled." reached the queue)
     q[k][field] = W.player_tokens and W.player_tokens(text) or text
 end
+-- R839 (owner 2026-11-08: never collect player names): every player seen this session — target, mouseover, nameplate,
+-- chat sender — is remembered by name, so a later harvest of that name is skipped (Forever names can have spaces)
+local players_seen = {}
+do
+    local pf = CreateFrame("Frame")
+    local function note_unit(u)
+        if u and UnitExists(u) and UnitIsPlayer(u) then
+            local n = plain(UnitName(u))
+            if n then players_seen[n] = true end
+        end
+    end
+    for _, ev in ipairs({ "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "NAME_PLATE_UNIT_ADDED", "GROUP_ROSTER_UPDATE",
+                          "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_CHANNEL", "CHAT_MSG_WHISPER", "CHAT_MSG_PARTY",
+                          "CHAT_MSG_PARTY_LEADER", "CHAT_MSG_RAID", "CHAT_MSG_GUILD", "CHAT_MSG_EMOTE", "CHAT_MSG_TEXT_EMOTE" }) do
+        pcall(pf.RegisterEvent, pf, ev)
+    end
+    pf:SetScript("OnEvent", function(_, ev, a1, a2)
+        if not W.hv_on() then return end
+        if ev == "PLAYER_TARGET_CHANGED" then note_unit("target")
+        elseif ev == "UPDATE_MOUSEOVER_UNIT" then note_unit("mouseover")
+        elseif ev == "NAME_PLATE_UNIT_ADDED" then note_unit(a1)
+        elseif ev == "GROUP_ROSTER_UPDATE" then for i = 1, 4 do note_unit("party" .. i) end
+        else
+            local who = plain(a2)
+            if who and who ~= "" then players_seen[(who:gsub("%-.*$", ""))] = true end
+        end
+    end)
+end
+-- the player's own name, a party / raid member's (quest-progress tooltip lines, minimap blips) or any player seen
+function W.is_group_name(s)
+    if players_seen[s] then return true end
+    local function same(u)
+        local n = UnitExists(u) and plain(UnitName(u))
+        return n and n == s
+    end
+    if same("player") then return true end
+    for i = 1, 4 do if same("party" .. i) then return true end end
+    if IsInRaid and IsInRaid() then for i = 1, 40 do if same("raid" .. i) then return true end end end
+    return false
+end
 function W.harvest(kind, key, val)
     if not (W.hv_on() and type(key) == "string" and key ~= "") then return end
     -- R391: gossip as the world DB writes it — the player's name / race / class back to $N / $R / $C ("Your legacy
     -- precedes you, druid." → "…, $C."), else the line is queued per character and its translation fits one class only
     if kind == "gossip" and W.player_tokens then key = W.player_tokens(key) end
+    -- R837 (owner 2026-11-08): one entry per objective, not one per count ("4/8 …", "5/8 …" → "0/8 …")
+    if kind == "objectives" then key = key:gsub("^%d+/(%d+) ", "0/%1 ") end
+    -- R837: player names have spaces on Forever ("Hartwig Hirschhorn"): never the player or a group member
+    if (kind == "names" or kind == "objects") and W.is_group_name(key) then return end
     hv()[kind][key] = val or true
 end
 -- at login (R223, owner 2026-10-07): drop harvested entries the shipped data now translates, so the counter in the
@@ -408,6 +471,24 @@ function W.prune_harvest()
     for k, v in pairs(h.items or {}) do                -- R734: by id or by the harvested EN name
         if W.IT[tonumber(k)] or (type(v) == "table" and W.IE[v.n]) then h.items[k] = nil end
     end
+    -- R836 (owner 2026-11-08): entries the last import already took in (build: WoWBY_HarvestSeen from data/harvest.json)
+    -- are dropped too, so the counter restarts after every import + build
+    local seen = WoWBY_HarvestSeen and WoWBY_HarvestSeen[GetLocale()]
+    if seen then
+        for kind, keys in pairs(seen) do
+            local t = h[kind]
+            if type(t) == "table" then
+                for k, v in pairs(keys) do
+                    if kind == "quests" and type(v) == "table" and type(t[k]) == "table" then
+                        for f in pairs(v) do t[k][f] = nil end
+                        if not next(t[k]) then t[k] = nil end
+                    elseif kind ~= "quests" then
+                        t[k] = nil
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- ---------- $-token substitution ----------
@@ -435,7 +516,7 @@ W.CLASSES = { Warrior = "Ваяр", Paladin = "Паладзін", Hunter = "Па
                   ["Death Knight"] = "Рыцар смерці" }   -- Priest: святар/святарка, never жрэц (owner 2026-09-28)
 W.CLASSES_FEM = {
     Warrior = "Ваярка", Paladin = "Паладзінка", Hunter = "Паляўнічая", Rogue = "Разбойніца",
-    Priest = "Святарка", Shaman = "Шаманка", Mage = "Маг", Warlock = "Чарнакніжніца", Druid = "Друідка",
+    Priest = "Святарка", Shaman = "Шаманка", Mage = "Магіня", Warlock = "Чарнакніжніца", Druid = "Друідка",
     ["Death Knight"] = "Рыцар смерці",
 }
 W.RACES = {
@@ -446,10 +527,10 @@ W.RACES = {
     ["Dwarf"] = { "Дворф", "Дварфійка" },            -- owner 2026-10-21 (R683): дворф (stressed о), дварфійка
     ["Gnome"] = { "Гном", "Гномка" },
     ["Human"] = { "Чалавек", "Чалавек" },
-    ["Orc"] = { "Орк", "Арчыха" },                  -- akanne: арчы́ха
+    ["Orc"] = { "Орк", "Арчанка" },
     ["Tauren"] = { "Таўрэн", "Таўрэнка" },
-    ["Troll"] = { "Троль", "Траліха" },
-    ["Undead"] = { "Нежыць", "Нежыць" },
+    ["Troll"] = { "Троль", "Тролька" },
+    ["Undead"] = { "Навец", "Наўка" },                  -- R910 (owner 2026-11-11, «Дапаможнік»): was «Нежыць»
     ["Draenei"] = { "Дрэней", "Дрэнейка" },
     ["Goblin"] = { "Гоблін", "Гоблінка" },
     -- Forever races (shen'dorei, R50): Skyborne = небароджаны, High Order = Вышэйшы ордэн, Windshaper = ветратворац
@@ -485,7 +566,7 @@ local CLASS_CASES = {   -- [EN] = { masculine 1..6, feminine 1..6 }
                forms("святарка|святаркі|святарцы|святарку|святаркай|святарцы") },
     Shaman = { forms("шаман|шамана|шаману|шамана|шаманам|шамане"),
                forms("шаманка|шаманкі|шаманцы|шаманку|шаманкай|шаманцы") },
-    Mage = { forms("маг|мага|магу|мага|магам|магу"), forms("маг|мага|магу|мага|магам|магу") },
+    Mage = { forms("маг|мага|магу|мага|магам|магу"), forms("магіня|магіні|магіні|магіню|магіняй|магіні") },   -- R933 owner: магіня
     Warlock = { forms("чарнакніжнік|чарнакніжніка|чарнакніжніку|чарнакніжніка|чарнакніжнікам|чарнакніжніку"),
                 forms("чарнакніжніца|чарнакніжніцы|чарнакніжніцы|чарнакніжніцу|чарнакніжніцай|чарнакніжніцы") },
     Druid = { forms("друід|друіда|друіду|друіда|друідам|друідзе"),
@@ -509,7 +590,7 @@ local RACE_CASES = {
     Tauren = { forms("таўрэн|таўрэна|таўрэну|таўрэна|таўрэнам|таўрэне"),
                forms("таўрэнка|таўрэнкі|таўрэнцы|таўрэнку|таўрэнкай|таўрэнцы") },
     Troll = { forms("троль|троля|тролю|троля|тролем|тролі"), forms("траліха|траліхі|тралісе|траліху|траліхай|тралісе") },
-    Undead = { forms("нежыць|нежыці|нежыці|нежыць|нежыццю|нежыці"), forms("нежыць|нежыці|нежыці|нежыць|нежыццю|нежыці") },
+    Undead = { forms("навец|наўца|наўцу|наўца|наўцом|наўцу"), forms("наўка|наўкі|наўцы|наўку|наўкай|наўцы") },
     Draenei = { forms("дрэней|дрэнея|дрэнею|дрэнея|дрэнеем|дрэнеі"),
                 forms("дрэнейка|дрэнейкі|дрэнейцы|дрэнейку|дрэнейкай|дрэнейцы") },
     Goblin = { forms("гоблін|гобліна|гобліну|гобліна|гоблінам|гобліне"),
@@ -535,7 +616,7 @@ end
 local function esc_pat(s) return (s:gsub("%p", "%%%0")) end
 -- R338: the text is RENDERED here ($G by player sex, $N, $B…): a caller that skipped W.substitute showed a raw
 -- «$Gнакіраваў:накіравала;» in an NPC greeting. Rendering twice is harmless (no tokens left after the first).
-local gossip_raw, gossip_norm, gossip_norm_index
+local gossip_raw, gossip_norm, gossip_norm_index, gossip_other_name
 -- the player's own name / race / class in a text → $N / $R / $C (gossip lookup and harvest)
 function W.player_tokens(t)
     local k = t
@@ -573,7 +654,46 @@ gossip_raw = function(t)
     end
     -- R514: keys and live texts differ in line breaks (\r\n / \n / $B) and double spaces, sometimes both at once
     -- (trainer greetings, the bear spirit, NPC mail were collected as "untranslated") → one normalised index
-    return gossip_norm_index()[gossip_norm(t)] or (k ~= t and gossip_norm_index()[gossip_norm(k)]) or nil
+    return gossip_norm_index()[gossip_norm(t)] or (k ~= t and gossip_norm_index()[gossip_norm(k)]) or gossip_other_name(t)
+end
+-- R820: "$n" filled with SOMEONE ELSE's name (an NPC toasting "Dexius", BroadcastText 576): keys holding $N become
+-- anchored patterns, bucketed by their first / last 12 characters (when those hold no token); the name found goes
+-- into the BE text, and $G there takes the masculine form (that person's sex is unknown)
+local NAMED
+local function named_index()
+    if NAMED then return NAMED end
+    NAMED = { head = {}, tail = {} }
+    for key, v in pairs(W.G) do
+        if type(key) == "string" and type(v) == "string" and key:find("%$[Nn]") then
+            local n = gossip_norm(key)
+            local p = "^" .. n:gsub("%$N", "\1"):gsub("%p", "%%%0"):gsub("\1", "([^\n]-)") .. "$"
+            local h, tl = n:sub(1, 12), n:sub(-12)
+            local side, bk = (not h:find("$", 1, true)) and "head" or (not tl:find("$", 1, true)) and "tail", nil
+            bk = side == "head" and h or tl
+            if side then
+                NAMED[side][bk] = NAMED[side][bk] or {}
+                table.insert(NAMED[side][bk], { p, v })
+            end
+        end
+    end
+    return NAMED
+end
+gossip_other_name = function(t)
+    local n = gossip_norm(t)
+    local ix = named_index()
+    for _, l in ipairs({ ix.head[n:sub(1, 12)] or {}, ix.tail[n:sub(-12)] or {} }) do
+        for _, e in ipairs(l) do
+            local caps = { n:match(e[1]) }
+            local who = caps[1]
+            local same = who and who ~= "" and #who <= 40
+            for _, c in ipairs(caps) do if c ~= who then same = false end end
+            if same then
+                local b = e[2]:gsub("%$[Gg]([^:;]*):([^;]*);", "%1"):gsub("%$[Nn]", (who:gsub("%%", "%%%%")))
+                return b
+            end
+        end
+    end
+    return nil
 end
 gossip_norm = function(s)
     s = s:gsub("\r", ""):gsub("%$[Bb]", "\n"):gsub("%$([nrc])", function(c) return "$" .. c:upper() end)
@@ -656,7 +776,9 @@ function W.entry_for(quest_id)
     if guard[k] == nil then
         local live = live_en_title(quest_id)
         if not live then return e end          -- unknown yet: trust, re-check next time
-        guard[k] = W.strtrim(live):lower() == W.strtrim(want):lower()   -- "Your Place in the World" vs "In The" (R481)
+        -- case and spacing don't count: "Your Place in the World" vs "In The" (R481), "One Shot. One Kill." vs two spaces (R807)
+        local function key(s) return W.strtrim(s):gsub("%s+", " "):lower() end
+        guard[k] = key(live) == key(want)
     end
     return guard[k] and e or nil
 end

@@ -65,11 +65,61 @@ local function tr_page(frame)
     end
 end
 
+-- Prev / Next (R802): text set once in the XML, on an unnamed FontString of each button
+local function tr_nav()
+    if not (W.on("ui") and W.ui_be) then return end
+    for _, b in ipairs({ _G.ItemTextPrevPageButton, _G.ItemTextNextPageButton }) do
+        W.each_fs(b, 0, function(fs)
+            local be = W.ui_be(plain(fs:GetText()))
+            if be then W.swap(fs, be) end
+        end)
+    end
+end
+
+-- DialogueUI's book window (R797): it reads ItemTextGetText through locals captured before WoWBY loads and draws in its own
+-- frame, so the ItemTextFrame hook never shows there. Its page cache is an unnamed frame (found by its method, like the
+-- tooltips in R784); every page and the title pass through it right before the layout is measured, so the BE text goes in
+-- there. Its files stay untouched. d.wowby = done: a re-opened book comes from the same cache and is not measured again.
+function W.dui_book_wrap(c)
+    local orig = rawget(c, "BeginCalculateTextHeight")
+    if type(orig) ~= "function" or rawget(c, "wowby_book") then return end
+    c.wowby_book = true
+    c.BeginCalculateTextHeight = function(self, ...)
+        local d = self.activeData
+        if d and not d.wowby and W.on("quests") and W.is_be() then
+            d.wowby = true
+            d.title = title_be(d.title) or d.title
+            for page, raw in ipairs(d.pageTexts or {}) do
+                local en = plain(raw)
+                if en and en ~= "" then
+                    local be = W.book_be(en)
+                    if be then
+                        d.pageTexts[page] = W.substitute(be)
+                    else
+                        W.harvest("books", token_key(page_key(en)), { title = plain(ItemTextGetItem and ItemTextGetItem()) or "", page = page })
+                    end
+                end
+            end
+        end
+        return orig(self, ...)
+    end
+end
+function W.hook_dui_books()
+    if not (_G.DUIBookFrame and EnumerateFrames) then return end
+    local f = EnumerateFrames()
+    while f do
+        local ok, found = pcall(function() return not f:IsForbidden() and rawget(f, "CacheCurrentPage") and rawget(f, "BeginCalculateTextHeight") end)
+        if ok and found then W.dui_book_wrap(f); return end
+        f = EnumerateFrames(f)
+    end
+end
+
 function W.hook_books()
     local f = _G.ItemTextFrame
     if not f or W.books_hooked then return end
     W.books_hooked = true
     f:HookScript("OnEvent", function(self, event)
+        if event == "ITEM_TEXT_READY" then tr_nav() end
         if not W.on("quests") then return end
         if event == "ITEM_TEXT_BEGIN" then
             tr_title(self)

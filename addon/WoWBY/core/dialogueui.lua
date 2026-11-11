@@ -223,6 +223,7 @@ function W.hook_dialogueui()
         end
     end
     dui_wrap_ui()
+    pcall(W.hook_dui_books)
     -- created while DialogueUI loads; one late pass for a frame made on first use
     pcall(dui_wrap_tooltips)
     C_Timer.After(5, function() pcall(dui_wrap_tooltips) end)

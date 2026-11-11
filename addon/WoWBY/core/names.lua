@@ -22,7 +22,10 @@ function W.pet_title_be(t)
     local core = inner or t
     if W.RU then core = W.en_line(core) end              -- «Питомец X» → "X's Pet" (R665)
     local owner, kind = core:match("^(.+)'s (%a+)$")
-    local be = owner and PET_WORD[kind] and (PET_WORD[kind] .. " " .. owner)
+    -- R824: an NPC owner ("Razormane Hunter's Pet", a server-only title) → its BE name after a colon (no genitive form
+    -- known: «Гадаванец: Паляўнічы Вастрагрывых»); a player owner keeps the name as is
+    local npc = owner and W.on("names") and W.N[owner]
+    local be = owner and PET_WORD[kind] and (npc and (PET_WORD[kind] .. ": " .. npc) or (PET_WORD[kind] .. " " .. owner))
     return be and ((col or "") .. be .. (r or "")) or nil
 end
 function W.name_be_unit(en, unit)

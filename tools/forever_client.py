@@ -1,6 +1,6 @@
-"""WoW Forever installs (R687, 2026-10-21). Two Forever clients share the CASC Data\\ folder:
-  _classic_beta_   product wow_classic_beta   (the beta, 1.60.1.70450 on 2026-10-17)
-  _forever_        product wowf               (the stress-test client, 1.60.1.70532 on 2026-10-21)
+"""WoW Forever installs (R687, 2026-10-21). Forever clients share the CASC Data\\ folder:
+  _forever_        product wowf               (the launch client)
+  _classic_beta_   product wow_classic_beta   (deleted 2026-11-07, the beta closed; ignored when absent)
 Tools read client data (DB2s) from the NEWEST build and merge the server caches (WDB, DBCache.bin, SavedVariables) of
 EVERY install — the owner plays either one. FOREVER_PRODUCT=<product> picks a build instead of the newest.
     from forever_client import product, newest, install_dirs

@@ -5,7 +5,7 @@ local _, W = ...
 local SPELL_LINES = {
     { "^(%d+) Mana$", "%1 маны" }, { "^(%d+) Rage$", "%1 лютасці" }, { "^(%d+) Energy$", "%1 энергіі" },
     { "^(%d+) Focus$", "%1 засяроджанасці" }, { "^([%d%.]+) yd range$", "Далёкасць %1 м" },
-    { "^Melee Range$", "Бліжні бой" }, { "^Unlimited range$", "Неабмежаваная далёкасць" },
+    { "^Melee Range$", "Блізкі бой" }, { "^Unlimited range$", "Неабмежаваная далёкасць" },
     { "^([%d%.]+) sec cast$", "Чытанне %1 сек." }, { "^([%d%.]+) min cast$", "Чытанне %1 хв." },
     -- neuter (дзеянне), owner 2026-10-01 R182
     { "^Instant$", "Імгненнае" }, { "^Instant cast$", "Імгненнае" }, { "^Channeled$", "Паточнае" },
@@ -39,6 +39,16 @@ local LIST_HEADS = { { "^Requires:", "Патрабуецца:" },       -- recip
                      { "^Патрабуецца:", "Патрабуецца:" }, { "^Рэагенты:", "Рэагенты:" },
                      { "^Інструменты:", "Інструменты:" } }
 local function req_list_be(t)
+    -- R923: the label in its own colour — profession window "Requires: Forge" arrives as "|cffffd100Requires:|r Forge"
+    -- (PROFESSIONS_REQUIRED_TOOLS' |cnNORMAL_FONT_COLOR: resolved) or already half-swapped «|cff…Патрабуецца:|r Forge»
+    local cc, lab, tail = t:match("^(|c%x%x%x%x%x%x%x%x)([^|]-:)|r(.+)$")
+    if not cc then cc, lab, tail = t:match("^(|cn[%w_]+:)([^|]-:)|r(.+)$") end
+    if cc then
+        local be = req_list_be(lab .. tail)
+        if not be then return nil end
+        local bl, brest = be:match("^([^:]-:)(.*)$")
+        return bl and (cc .. bl .. "|r" .. brest) or nil
+    end
     local rest, head
     for _, h in ipairs(LIST_HEADS) do
         local s, e = t:find(h[1])
@@ -68,6 +78,21 @@ local function req_list_be(t)
     return head .. table.concat(out, sep)
 end
 W.req_list_be = req_list_be                      -- (exposed for tools/addon_probe.py)
+-- recipe tooltips list the reagents with NO heading (R921, QA 2026-11-11): "Thin Kodo Leather (3), Light Leather (4),
+-- Coarse Thread" — every piece must be a known ITEM name (+ optional "(N)"), and a single piece needs the count
+function W.reagent_line_be(t)
+    if not W.on("spells") or t:find("|", 1, true) or W.ours(t) then return nil end
+    local out, counted = {}, false
+    for piece in (t .. ", "):gmatch("(.-), ") do
+        local nm, num = piece:match("^(.-) (%(%d+%))$")
+        local be = W.IE[nm or piece]
+        if not be then return nil end
+        counted = counted or num ~= nil
+        out[#out + 1] = be .. (num and (" " .. num) or "")
+    end
+    if #out < 2 and not counted then return nil end
+    return table.concat(out, ", ")
+end
 -- FULLDATE "Sunday, October 11 2026" (calendar day tooltips, R314) → «Нядзеля, 11 кастрычніка 2026» (month genitive)
 local WEEKDAY_BE = { Monday = "Панядзелак", Tuesday = "Аўторак", Wednesday = "Серада", Thursday = "Чацвер",
                      Friday = "Пятніца", Saturday = "Субота", Sunday = "Нядзеля" }
@@ -164,7 +189,7 @@ function tooltip_line_core(t)
     if dt then return dt end
     local pt = W.on("names") and W.pet_title_be(t)                   -- "X's Pet" → «Гадаванец X» (R315)
     if pt then return pt end
-    local rq = req_list_be(t)
+    local rq = req_list_be(t) or W.reagent_line_be(t)
     if rq then return rq end
     if t == "Back" then return "Спіна" end
     -- a whole line that is a quest title wins over the UI formats (R567: "Camping 101: First Aid" was built piece by piece
@@ -199,9 +224,9 @@ function tooltip_line_core(t)
     -- armour types on the item tooltip's right side (R37): "Mail" is «Пошта» everywhere else (mailbox)
     -- weapon types too (R105: "Axe" stayed English)
     local armor = ({ Mail = "Кальчуга", Cloth = "Тканіна", Leather = "Скура", Plate = "Латы",
-                     Axe = "Сякера", Sword = "Меч", Mace = "Дробячая зброя", Dagger = "Кінжал", Staff = "Посах",
+                     Axe = "Сякера", Sword = "Меч", Mace = "Булава", Dagger = "Кінжал", Staff = "Посах",
                      Polearm = "Дрэўкавая зброя", Bow = "Лук", Gun = "Агнястрэльная зброя", Crossbow = "Арбалет",
-                     Wand = "Жазло", ["Fist Weapon"] = "Кісцявая зброя", ["Fishing Pole"] = "Вуда",
+                     Wand = "Жазло", ["Fist Weapon"] = "Кісцевая зброя", ["Fishing Pole"] = "Вуда",
                      Idol = "Ідал", Totem = "Татэм", Libram = "Лібрам", Arrow = "Страла", Bullet = "Куля",
                      Thrown = "Кідальная зброя", Shield = "Шчыт" })[t]
     if armor then return armor end
@@ -320,7 +345,8 @@ if TooltipDataProcessor and TooltipDataProcessor.AllTypes then
         local unit_tip = data and W.sid_ok(data.type) == 2
         -- a pet's name (line 1) is its owner's choice: "Bear" must not become «Мядзведзь» via the UI words (R214)
         local g = unit_tip and W.sid_ok(data.guid)
-        if type(g) == "string" and g:find("^Pet") and data.lines and data.lines[1] == ld then
+        -- R920: a PLAYER's name too (a player "Heal Undead" had become «Лечым: Наўе» via the UI format "Heal %s")
+        if type(g) == "string" and (g:find("^Pet") or g:find("^Player")) and data.lines and data.lines[1] == ld then
             W.current_tooltip_female = false; return
         end
         for _, k in ipairs({ "leftText", "rightText" }) do
@@ -381,7 +407,8 @@ local function tr_tooltip(tt)
         for _, side in ipairs({ "TextLeft", "TextRight" }) do
             local fs = _G[n .. side .. i]
             local t = fs and plain(fs:GetText())
-            if t and t ~= "" and not (i == 2 and guild2 and not t:find("^" .. (LEVEL or "Level") .. " ")) then
+            if t and t ~= "" and not (i == 2 and guild2 and not t:find("^" .. (LEVEL or "Level") .. " "))
+                and not (i == 1 and guild2) then                -- R920: line 1 = the player's name, kept
                 local be = tooltip_line_be(t)
                 if be and be ~= t then fs:SetText(be); changed = true end
             end
@@ -1113,7 +1140,8 @@ local function retext_menu_fs(r)
         t = W.is_be() and W.on("spells") and plain(r:GetText())
         if t and not W.ours(t) then
             local c, name = t:match("^(|c%x%x%x%x%x%x%x%x)(.-)|r$")
-            local be = W.IE[name or t]
+            -- R822: spell names too (minimap tracking menu "Find Herbs", "Track Beasts")
+            local be = W.IE[name or t] or W.spell_name_be(name or t)
             if be then W.swap(r, c and (c .. be .. "|r") or be) end
         end
     end)
@@ -1147,8 +1175,24 @@ if _G.Menu and Menu.ModifyMenu and type(WoWBY_MenuTags) == "table" then
 end
 if EventRegistry and EventRegistry.RegisterCallback then
     local menu_tickers = {}                               -- one per open menu (submenus are menus too)
+    -- R914 (QA screenshot 2026-11-11: setting a raid target from the target's right-click menu → "WoWBY has been blocked
+    -- from an action only available to the Blizzard UI"): unit popups (tags MENU_UNIT_*) run protected actions
+    -- (SetRaidTargetIcon, focus, invite…) from their rows; our row re-texting tainted them. Leave unit menus English —
+    -- the same rule as Menu.ModifyMenu above (unit popups excluded), now also for this show-time pass.
+    local function unit_menu_open()
+        local mgr = _G.Menu and Menu.GetManager and Menu.GetManager()
+        local ok, tags = pcall(function() return mgr and mgr:GetOpenMenuTags() end)
+        if ok and type(tags) == "table" then
+            for _, t in pairs(tags) do
+                if type(t) == "string" and t:find("^MENU_UNIT_") then return true end
+            end
+        end
+        local ok2, root = pcall(function() return mgr and mgr:GetOpenMenu() end)
+        local ok3, tag = pcall(function() return root and root:ToDebugString() end)
+        return ok2 and ok3 and type(tag) == "string" and tag:find("^MENU_UNIT_") ~= nil
+    end
     EventRegistry:RegisterCallback("MenuProxy.OnShow", function(_, menu)
-        if not (W.on("ui") and menu) then return end
+        if not (W.on("ui") and menu) or unit_menu_open() then return end
         C_Timer.After(0, function() if menu:IsShown() then retext_menu(menu, 0) end end)
         if menu_tickers[menu] then menu_tickers[menu]:Cancel() end
         menu_tickers[menu] = C_Timer.NewTicker(0.3, function()   -- scrolling lists re-use their rows

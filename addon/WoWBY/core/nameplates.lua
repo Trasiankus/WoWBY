@@ -327,7 +327,7 @@ local function style_plate(plate)
     local t = unit_title(unit)
     -- English mode (or names off): the title stays English too, like the name above it
     local tbe = t and W.on("names") and (UnitSex(unit) == 3 and (WoWBY_TitlesF or {})[t] or TITLES_NP[t]
-                                         or (pc and W.pet_title_be(t)))
+                                         or W.pet_title_be(t))   -- R824: NPCs' pets too
     if t and not tbe and pc and W.on("names") then
         W.any_name = true                                 -- "%s's Pet" → «Гадаванец: Stariela Solitas» (name kept)
         local ok, be = pcall(W.ui_be, t)
@@ -411,6 +411,18 @@ function W.start_np_ticker()
             enforce_t = enforce_t + 1
             if enforce_t >= 8 then enforce_t = 0; enforce_cvars() end     -- every 2 s
         end)
+    end
+end
+-- R913 (owner 2026-11-11): name-only plates (Belarusian names + titles over NPCs) are ON by default — once per install,
+-- for anyone who never used the option (no CVar backup = never switched it on or off). A later «off» is remembered.
+function W.nameonly_default()
+    if not WoWBY_DB or WoWBY_DB.np_default_done or InCombatLockdown() then return end
+    WoWBY_DB.np_default_done = true
+    if WoWBY_DB.nameonly == nil and WoWBY_DB.cvar_backup == nil and W.set_nameonly(true) ~= false then
+        -- owner 2026-11-11: default «NPC names» = 3 «Варожыя, сюжэтныя і інтэрактыўныя NPC» (was the game's choice)
+        WoWBY_DB.npc_mode = 3
+        W.style_all_plates()
+        DEFAULT_CHAT_FRAME:AddMessage("|cff8080ffWoWBY:|r беларускія імёны над NPC уключаныя. Выключыць можна ў наладах: /wowby")
     end
 end
 function W.set_nameonly(v)

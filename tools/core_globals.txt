@@ -27,6 +27,7 @@ DisplaySystemMessageInPrimary
 Enum
 EnumerateFrames
 EventRegistry
+FriendsFrame
 GameMenuFrame
 GameTimeFrame
 GameTime_GetFormattedTime
@@ -47,11 +48,14 @@ GetNumBuybackItems
 GetOptions
 GetPlayerInfoByGUID
 GetQuestID
+GetQuestLogLeaderBoard
 GetQuestLogQuestText
 GetRealmName
 GetText
 GetTime
 GetTitleText
+GetTradePlayerItemInfo
+GetTradeTargetItemInfo
 HOUR_ONELETTER_ABBR
 HelpTip
 HelpTipTemplateMixin
@@ -62,6 +66,7 @@ ITEM_SPELL_TRIGGER_ONUSE
 ITEM_TEXT_FROM
 InCombatLockdown
 InboxFrame
+IsInRaid
 IsTestBuild
 ItemTextGetCreator
 ItemTextGetItem
@@ -83,7 +88,6 @@ MirrorTimerContainer
 NUM_CHAT_WINDOWS
 NUM_CONTAINER_FRAMES
 ObjectiveTrackerFrame
-ObjectiveTrackerManager
 OpenMailBodyText
 OpenMailFrame
 OpenMailSender
@@ -105,6 +109,7 @@ QuestMapFrame_GetDetailQuestID
 QuestScrollFrame
 RAID_CLASS_COLORS
 REWARDS
+RecentAlliesEntryMixin
 SECOND_ONELETTER_ABBR
 SELL_PRICE
 SLASH_WOWBY1
@@ -116,6 +121,7 @@ SkillsFrame
 SkillsHeaderMixin
 SlashCmdList
 StaticPopup_FindVisible
+TRADE_ENCHANT_SLOT
 TooltipComparisonManager
 TooltipDataProcessor
 UIParent
@@ -142,6 +148,7 @@ WoWBY_Books
 WoWBY_DB
 WoWBY_Factions
 WoWBY_Gossip
+WoWBY_HarvestSeen
 WoWBY_Items
 WoWBY_ItemsEN
 WoWBY_MenuTags
@@ -173,6 +180,7 @@ WoWBY_TitlesF
 WoWBY_UI
 WoWBY_UIF
 WoWBY_UIFX
+WoWBY_ZoneLoc
 WoWBY_Zones
 WorldMapFrame
 _G
@@ -196,6 +204,7 @@ plain
 print
 rawget
 select
+seterrorhandler
 setmetatable
 string
 strsplit

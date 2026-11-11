@@ -50,7 +50,13 @@ def main():
                 f.write("\n")
             os.replace(path + ".tmp", path)
     print("total:", total, "(check only)" if a.check else "")
-    if a.check and total:
+    # R888 (owner 2026-11-11): the same rules over the hand tables that win at build (ui_be, names_fix, itemnames_fix,
+    # skills_be…) + a report of shipped Lua strings — a term change must reach EVERY place, not only data/be
+    import subprocess
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "fix_hand_tables.py")]
+                       + (["--check"] if a.check else []), capture_output=True, text=True, encoding="utf-8")
+    print((r.stdout or "").strip().splitlines()[-1] if r.stdout.strip() else r.stderr.strip()[-300:])
+    if a.check and (total or r.returncode):
         sys.exit(1)
 
 

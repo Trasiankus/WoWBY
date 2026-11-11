@@ -34,7 +34,7 @@ end
 local category
 local function build_options(gname)
     local f = CreateFrame("Frame", gname)
-    f:SetSize(400, 520); f:Hide()                  -- +28: the with-bars sub-option (R743); +12: counter on 2 lines (R781)
+    f:SetSize(400, 548); f:Hide()                  -- +28: the with-bars sub-option (R743); +12: counter on 2 lines (R781); +28: buff timers (R829)
     local title = label(f, "|cff8080ffWoWBY|r — беларускі пераклад", 15); title:SetPoint("TOPLEFT", 24, -16)
     f.page_title = title                           -- the standalone window has it in its header instead
 
@@ -53,6 +53,14 @@ local function build_options(gname)
             W.refresh()
         end)
         boxes[a[1]] = cb; y = y - 28
+        if a[1] == "spells" then
+            -- R829 (owner 2026-11-08): buff / debuff timers under the icons («40 хв»), a sub-option of spells, on by default
+            local bt = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+            bt:SetSize(24, 24); bt:SetPoint("TOPLEFT", 56, y)
+            local bl = label(f, "Працягласць эфектаў (60 хв)"); bl:SetPoint("LEFT", bt, "RIGHT", 4, 0)
+            bt:SetScript("OnClick", function(self) WoWBY_DB.buff_times = self:GetChecked() and true or false end)
+            boxes.buff_times = bt; y = y - 28
+        end
     end
 
     local function extra_box(text, get, set, indent)
@@ -137,7 +145,14 @@ local function build_options(gname)
 
     function f.sync()
         lang:SetText(W.is_be() and "Мова: беларуская  >  English" or "Language: English  >  беларуская")
-        for area, cb in pairs(boxes) do cb:SetChecked(not (WoWBY_DB.off and WoWBY_DB.off[area])) end
+        for area, cb in pairs(boxes) do
+            if area == "buff_times" then
+                cb:SetChecked(WoWBY_DB.buff_times ~= false)
+                if cb.SetEnabled then cb:SetEnabled(W.on("spells") and true or false) end
+            else
+                cb:SetChecked(not (WoWBY_DB.off and WoWBY_DB.off[area]))
+            end
+        end
         np:SetChecked(np.get() and true or false); hvb:SetChecked(hvb.get() and true or false); chb:SetChecked(chb.get() and true or false)
         dub:SetChecked(dub.get() and true or false)
         npb:SetChecked(npb.get() and true or false)
@@ -149,7 +164,7 @@ local function build_options(gname)
             local c = 0; for _ in pairs(h and h[kind] or {}) do c = c + 1 end; n[kind] = c
         end
         -- what is still untranslated (pruned at login once a build translates it, R223 / R677)
-        hvc:SetText(("Сабрана: заданняў %d, імёнаў %d, аб'ектаў %d, зон %d, размоў %d, мэтаў %d, старонак %d"):format(
+        hvc:SetText(("Сабрана: заданняў %d, імёнаў %d, аб'ектаў %d, зон %d, размоў %d, мэт %d, старонак %d"):format(
             n.quests, n.names, n.objects, n.zones, n.gossip, n.objectives, n.books))
         eb:SetText(W.my_name_be() or "")
         hint:SetText("Калі пустое, выкарыстоўваецца арыгінальнае імя")     -- owner 2026-10-20 (R678)
@@ -176,7 +191,7 @@ local function standalone()
     local ok, w = pcall(CreateFrame, "Frame", "WoWBYOptionsWindow", UIParent, "PortraitFrameTemplate")
     if not ok then ok, w = pcall(CreateFrame, "Frame", "WoWBYOptionsWindow", UIParent, "BasicFrameTemplateWithInset") end
     win = ok and w or CreateFrame("Frame", "WoWBYOptionsWindow", UIParent)
-    win:SetSize(410, 540); win:SetPoint("CENTER"); win:SetFrameStrata("DIALOG"); win:SetClampedToScreen(true)
+    win:SetSize(410, 568); win:SetPoint("CENTER")         -- +28 for the buff-timer row (R829); win:SetFrameStrata("DIALOG"); win:SetClampedToScreen(true)
     win:SetMovable(true); win:EnableMouse(true); win:RegisterForDrag("LeftButton")
     win:SetScript("OnDragStart", win.StartMoving); win:SetScript("OnDragStop", win.StopMovingOrSizing)
     local HEADER = "WoWBY — беларускі пераклад"

@@ -74,6 +74,23 @@ def junk(en, prose=None):
     return not prose and bool(JUNK_NAMEW.search(en))
 
 
+_OBJ_FIX = None
+
+
+def _objectives_fix():
+    """EN lines of data/objectives_fix.tsv (hand-translated tracker lines, R826)."""
+    global _OBJ_FIX
+    if _OBJ_FIX is None:
+        _OBJ_FIX = set()
+        p = os.path.join(ROOT, "data", "objectives_fix.tsv")
+        if os.path.exists(p):
+            for line in open(p, encoding="utf-8"):
+                c = line.rstrip("\n").split("\t")
+                if len(c) >= 2 and c[0] != "en" and c[0]:
+                    _OBJ_FIX.add(c[0])
+    return _OBJ_FIX
+
+
 def collect():
     pk = {k: [] for k in ORDER}
     skipped = []
@@ -136,7 +153,10 @@ def collect():
             pk[kind + "s" if kind != "gossip" else "gossip"].append(item)
         elif kind == "objective":                    # quest objective line / place from the tracker (harvest)
             en = v.get("v", "")
-            if junk(en): skipped.append(("objectives", ident, en)); continue
+            # R826: an objective of a known quest is prose ("Test the Dried Seeds" is a real task, not a dev name);
+            # a line already translated by hand (data/objectives_fix.tsv) is not queued
+            if en in _objectives_fix(): continue
+            if junk(en, prose=True if v.get("quest") else None): skipped.append(("objectives", ident, en)); continue
             q = v.get("quest", "")
             pk["objectives"].append({"id": ident, "en": en, "ru": "",
                                      "note": "quest objective line (tracker / quest log) of quest %s%s" % (
@@ -498,11 +518,11 @@ def spellnames_redo():
 
 
 # ---- R135-R143 (owner 2026-09-30: "add all to Gemini, re-translation ones too; books the lowest priority") ----------
-STAT_NOTE = ("stat words exactly as on our item tooltips: Stamina = Целабудова, Strength = Сіла, Agility = Спрытнасць, "
+STAT_NOTE = ("stat words exactly as on our item tooltips: Stamina = Вынослівасць, Strength = Сіла, Agility = Спрытнасць, "
              "Intellect = Інтэлект, Spirit = Дух, Defense = Абарона, Armor = Браня, Attack Power = Сіла атакі, "
              "Spell Damage = урон ад заклёнаў, Healing = лячэнне, Fire/Frost/Nature/Shadow/Arcane/Holy Resistance = "
              "супраціўленне агню / марозу / прыродзе / цемры / аркане / святлу, mana per 5 sec. = маны за 5 сек.; "
-             "form «+5 Целабудова», «+2% да ўхілення»")
+             "form «+5 Вынослівасць», «+2% да ўхілення»")
 
 
 def db2_texts(table, fields, skip=None):

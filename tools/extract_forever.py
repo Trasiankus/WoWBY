@@ -83,6 +83,24 @@ def hotfix_overlay(table, table_hash, en_rows):
 RU_FALLBACK = []          # other Forever installs to read the ruRU files from (main() fills it)
 
 
+def prev_db2(table):
+    """The last dump of a table: {(id, field, idx): (ru, ann_en, status, en)}. The launcher deletes the build configs of other
+    products, so the Anniversary baseline and the beta's ruRU files can vanish (R805, build 70862): those two columns then
+    stay as the last extract that could read them. Rows of the hotfix tables stay too: the deleted beta install's DBCache.bin
+    held ~1,350 ItemSparse rows that neither the client file nor Forever's cache has (the beta closed, owner 2026-11-07),
+    and a build without them would drop those item names from the addon."""
+    p = os.path.join(OUT, "db2", table + ".tsv")
+    if not os.path.exists(p): return {}
+    un = {"t": "\t", "r": "\r", "n": "\n", "\\": "\\"}
+    out = {}
+    with open(p, encoding="utf-8", newline="\n") as f:
+        next(f, None)
+        for line in f:
+            c = [re.sub(r"\\(.)", lambda m: un.get(m.group(1), m.group(0)), v) for v in line.rstrip("\n").split("\t")]
+            if len(c) >= 7: out[(int(c[0]), c[1], int(c[2]))] = (c[4], c[5], c[6], c[3])
+    return out
+
+
 def dump_db2(beta, ann):
     lf = {v.split("/")[-1][:-4]: k for k, v in load_listfile(r"^dbfilesclient/.*\.db2$").items()}
     tables, stats, errors = {}, collections.Counter(), []
@@ -106,14 +124,20 @@ def dump_db2(beta, ann):
                 ru_rows = DB2(rb if src is beta else src.read_fdid(fd, "ruRU"), real).strings(dbd); break
             except Exception:
                 continue
+        prev = prev_db2(real) if ann is None or not ru_rows or real in HOTFIX_FIELDS else {}
         ann_rows = []
-        ad = ann.read_fdid(fd, "enUS")
+        ad = ann.read_fdid(fd, "enUS") if ann else None
         if ad:
             try: ann_rows = DB2(ad, real).strings(dbd)
             except Exception: ann_rows = None  # older layout not in dbd / different schema
-        ru = {(i, f, a): s for i, f, a, s in ru_rows}
+        ru = {(i, f, a): s for i, f, a, s in ru_rows} or {k: v[0] for k, v in prev.items() if v[0]}
         an = {(i, f, a): s for i, f, a, s in ann_rows} if ann_rows is not None else None
+        if ann is None:
+            an = None if any(v[2] == "?" for v in prev.values()) else {k: v[1] for k, v in prev.items() if v[2] != "new"}
         en_rows = hotfix_overlay(real, en.table_hash, en_rows)
+        if real in HOTFIX_FIELDS:
+            have = {(i, f, a) for i, f, a, _s in en_rows}
+            en_rows = list(en_rows) + [(*k, v[3]) for k, v in prev.items() if k not in have and v[3]]
         rows = []
         for i, f, a, s in sorted(en_rows, key=lambda r: (r[0], r[1], r[2])):
             if not f.endswith("_lang"): continue  # non-localized string columns (internal tags, paths)
@@ -236,8 +260,14 @@ def questie_objects():
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     beta = Casc(build_key_for(forever_client.product()))         # the newest Forever build installed (R687)
-    ann = Casc(build_key_for("wow_anniversary"), idx=beta.idx)
-    print(beta.build_name, "vs baseline", ann.build_name)
+    try:
+        ann = Casc(build_key_for("wow_anniversary"), idx=beta.idx)
+        baseline = ann.build_name
+    except KeyError:                         # R805: its build config is gone; keep the baseline of the last dump
+        ann = None
+        m = re.search(r"^Baseline for 'new': (\S+)", open(os.path.join(OUT, "report.md"), encoding="utf-8").read(), re.M)
+        baseline = (m.group(1) if m else "unknown") + " (kept from the last extract)"
+    print(beta.build_name, "vs baseline", baseline)
     for p in ("wow_classic_beta",):         # ruRU source when the newest install has English only (2026-10-28)
         if p != forever_client.product():
             try: RU_FALLBACK.append(Casc(build_key_for(p), idx=beta.idx))
@@ -253,7 +283,13 @@ def main():
 
     lf = {v.split("/")[-1][:-4]: k for k, v in load_listfile(r"^dbfilesclient/questv2\.db2$").items()}
     qv2 = DB2(beta.read_fdid(lf["questv2"], "enUS"), "QuestV2").ids()
-    ann_qv2 = DB2(ann.read_fdid(lf["questv2"], "enUS"), "QuestV2").ids()
+    if ann:
+        ann_qv2 = DB2(ann.read_fdid(lf["questv2"], "enUS"), "QuestV2").ids()
+    else:                                    # R805: the Anniversary quests the last extract recorded
+        old = json.load(open(os.path.join(ROOT, "data", "strings_en.json"), encoding="utf-8"))
+        ann_qv2 = {int(k[6:]) for k, v in old.items() if k.startswith("quest:") and v.get("why") == "untranslated"}
+        with open(os.path.join(OUT, "quests_no_text.tsv"), encoding="utf-8") as f:
+            ann_qv2 |= {int(r[0]) for r in (l.split("\t") for l in list(f)[1:]) if len(r) > 1 and r[1] == "1"}
 
     q_en = json.load(open(os.path.join(TB, "classic", "quests_en.json"), encoding="utf-8"))
     q_be = json.load(open(os.path.join(TB, "classic", "quests_be.json"), encoding="utf-8"))
@@ -262,6 +298,8 @@ def main():
     ru_q, ru_n, ru_o = questie_ru("lookupQuests"), questie_ru("lookupNpcs"), questie_ru("lookupObjects")
 
     strings, why = {}, collections.Counter()
+    fresh_be = json.load(open(os.path.join(ROOT, "data", "strings_be.json"), encoding="utf-8"))
+    tkey = lambda t: " ".join((t or "").split()).casefold()
 
     # -- quests: cache text for quests WoWBY lacks, or whose EN changed
     for qid, q in sorted(quests_c.items()):
@@ -270,6 +308,9 @@ def main():
         if k in q_be and k in q_en:
             old = q_en[k]
             changed = [f for f in cur if norm(cur[f]) != norm(old.get(f))]
+            # R807: a title that only changed case / spacing ("Wanted: X" -> "WANTED: X") is not a new text to translate;
+            # quests already re-translated from Forever's text stay in the diff, or their newer translation would be lost
+            if changed == ["t"] and tkey(cur["t"]) == tkey(old.get("t")) and "quest:" + k not in fresh_be: continue
             if not changed: continue
             reason = "changed:" + ",".join(changed)
             be_old = {f: q_be[k].get(f) for f in changed}
@@ -673,7 +714,7 @@ def main():
     wtsv(os.path.join(OUT, "diff_ui_globalstrings.tsv"), ["key", "en", "ru", "status"], ui)
 
     rep = ["# WoW Forever text extraction — %s" % beta.build_name, "",
-           "Baseline for 'new': %s (enUS). Translation baseline: WoWBY vanilla (turtle-bel data/classic, names_be)." % ann.build_name, "",
+           "Baseline for 'new': %s (enUS). Translation baseline: WoWBY vanilla (turtle-bel data/classic, names_be)." % baseline, "",
            "## Translation diff (`data/strings_en.json`, `todo.txt`): %d entries" % len(strings)]
     rep += ["- %s: %d" % kv for kv in sorted(why.items())]
     rep += ["", "## Quests", "- QuestV2 IDs in beta: %d; not in WoWBY classic: %d" % (len(qv2), len(qv2 - set(map(int, q_en)))),

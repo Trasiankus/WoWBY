@@ -37,6 +37,8 @@ local PLAYER_FMT_KEYS = {
     "LOOT_ROLL_PASSED", "LOOT_ROLL_WON", "LOOT_ROLL_GREED", "LOOT_ROLL_NEED", "LOOT_ROLL_DISENCHANT",
     "LOOT_ROLL_ROLLED_NEED", "LOOT_ROLL_ROLLED_GREED", "LOOT_ROLL_ROLLED_DE", "LOOT_ROLL_WON_NO_SPAM_NEED",
     "LOOT_ROLL_WON_NO_SPAM_GREED",
+    "DUEL_WINNER_KNOCKOUT", "DUEL_WINNER_RETREAT",   -- R808
+    "ERR_PLAYER_DIED_S",   -- R819: "Wildu has died."
 }
 local player_pats
 local function is_player_line(t)
@@ -45,7 +47,9 @@ local function is_player_line(t)
         for _, k in ipairs(PLAYER_FMT_KEYS) do
             local en = type(_G[k]) == "string" and _G[k]
             if en then
-                local p = en:gsub("[%^%$%(%)%.%[%]%*%+%-%?%%]", "%%%0"):gsub("%%%%s", ".+"):gsub("%%%%d", "%%d+")
+                -- R808: |3-4(%s) = a Russian declined value (the line itself holds the plain name); %1$s = a numbered value
+                local p = en:gsub("|3%-%d+%((.-)%)", "%1"):gsub("[%^%$%(%)%.%[%]%*%+%-%?%%]", "%%%0")
+                    :gsub("%%%%%d+%%%$s", ".+"):gsub("%%%%s", ".+"):gsub("%%%%%d+%%%$d", "%%d+"):gsub("%%%%d", "%%d+")
                 player_pats[#player_pats + 1] = "^" .. p .. "$"
             end
         end
@@ -74,11 +78,17 @@ local function msg_be(t, event)
     if not (t and t ~= "" and W.is_be() and W.on("ui")) then return nil end
     local sv = server_msg_be(t)
     if sv then return sv end
-    W.any_name = event == "CHAT_MSG_TEXT_EMOTE" or event == "CHAT_MSG_PING" or is_player_line(t)   -- pings: "Attack: <player>" (R581)
+    local emote = event == "CHAT_MSG_TEXT_EMOTE" or event == "CHAT_MSG_PING"   -- pings: "Attack: <player>" (R581)
+    -- R819: names there are players, kept; R920: emote / ping names too ("You thank Heal Undead." had become
+    -- «Вы дзякуеце Лечым: Наўе.» through the nested UI format "Heal %s")
+    W.player_names = emote or is_player_line(t)
+    W.emote_names = emote                                                  -- an emote's target may be an NPC (W.N)
+    W.any_name = emote or W.player_names
     local ok, be = pcall(W.ui_be, t)
-    W.any_name = false
+    W.any_name, W.player_names, W.emote_names = false, false, false
     return ok and be ~= t and be or nil
 end
+W.msg_be = msg_be
 -- NPC speech ("Gubber Blump says: Fishing is real easy…"): server text (BroadcastText is not in the client DB2),
 -- so it is harvested like gossip (kind "gossip", value = speaker) and translated through the gossip package ->
 -- WoWBY_Gossip. The player's own name inside a line is stored as $N. The speaker's name goes through N.
@@ -129,7 +139,7 @@ local function links_be(t)
         id = tonumber(id)
         local be
         if kind == "quest" and W.on("quests") then be = W.be_title(id)
-        elseif kind == "item" and W.on("spells") then be = W.IT[id] or W.IE[text]
+        elseif kind == "item" and W.on("spells") then be = W.item_name_be(text, id)   -- R825: random suffixes too
         elseif (kind == "spell" or kind == "enchant" or kind == "trade") and W.on("spells") and W.spell_name_be then
             -- recipe links (R356): "[Enchanting: Enchant Chest - Lesser Stats]" = profession + ": " + spell name
             local prof, nm = text:match("^([^:]+): (.+)$")
@@ -202,8 +212,8 @@ function W.hook_messages()
         -- chat language tag «[Darnassian] …» (the event's language arg, owner R555): feminine adjective = «мова»
         local LANG = { Common = "Агульная", Darnassian = "Дарнаская", Orcish = "Арчыная", Dwarvish = "Дварфійская",
                        Gnomish = "Гномская", Taurahe = "Таўрахэ", Thalassian = "Таласійская", Troll = "Тролья",
-                       Gutterspeak = "Мова нежыці", Draconic = "Драконская", Demonic = "Дэманічная", Titan = "Мова тытанаў",
-                       Kalimag = "Калімаг", Pandaren = "Пандарэнская", ["Shen'dorei"] = "Шэн'дарэй" }
+                       Gutterspeak = "Наўская", Draconic = "Драконавая", Demonic = "Дэманічная", Titan = "Мова тытанаў",
+                       Kalimag = "Калімаг", Pandaren = "Пандарэнская", ["Shen'dorei"] = "Шэн'дарай" }
         if W.ru_alias then W.ru_alias(LANG, "ui") end      -- ruRU client: «Всеобщий» (R665)
         local function lang_be(l)
             l = plain(l)
@@ -226,11 +236,21 @@ function W.hook_messages()
     if ef and ef.AddMessage then
         hooksecurefunc(ef, "AddMessage", function(self, msg, r, g, b, a, id)
             -- quest progress ("Bloodfeather Belt: 4/6", "Gnarlpine Mystic slain: 3/7") = objective lines (R19)
-            local be = msg_be(msg) or (W.is_be() and W.obj_be and W.obj_be(msg)) or nil
+            -- R838: whole objective lines too, with "(Complete)" ("Cleanse the Winterhoof Water Well (Complete)")
+            local p = plain(msg)
+            local be = msg_be(msg) or (p and W.is_be() and W.obj_line_be and W.obj_line_be(p)) or nil
             if not be then return end
             local function swap()
                 local fs = id and self.GetFontStringByID and self:GetFontStringByID(id)
-                if fs and plain(fs:GetText()) == msg then W.swap(fs, be) end
+                if fs and plain(fs:GetText()) == msg then W.swap(fs, be); return end
+                -- R884 (owner screenshot: «4/7 Мяса…» translated, "Plainstrider Feather: 5/7" under it not): two quest-progress
+                -- lines in one moment share the message id (or have none), so the id finds only one of them — find the line by
+                -- its text among the frame's FontStrings
+                if W.each_fs then
+                    W.each_fs(self, 1, function(f)
+                        if plain(f:GetText()) == msg then W.swap(f, be) end
+                    end)
+                end
             end
             swap(); C_Timer.After(0, swap)
         end)
@@ -879,7 +899,8 @@ end
 -- line ("message" or "Sender: message", SUBTITLE_FORMAT) into its Subtitles FontStrings and sizes the background from
 -- the text right after → a SetText post-hook per FontString swaps before the measure. Lookup = NPC speech (W.gossip_be:
 -- BroadcastText lines in gossip_fix / the gossip tables); misses are harvested as gossip.
--- Buff / debuff timers under the icons (R51, owner trial 2026-11-05): "40 m" → «40 хв». Blizzard writes them every frame with
+-- Buff / debuff timers under the icons (R51, owner trial 2026-11-05; shipped R829 as the option «Працягласць эфектаў (60 хв)»
+-- under «Заклёны і прадметы», WoWBY_DB.buff_times, on unless false): "40 m" → «40 хв». Blizzard writes them every frame with
 -- SetFormattedText; the post-hook swaps in the same call, so no blink. A secret text in combat stays English (plain = nil).
 -- EXPERIMENT: a per-object hook on these frames is what R29 warned about. If Edit Mode / action bars break, remove this block
 -- + "hook_buff_times" in events.lua.
@@ -888,7 +909,7 @@ end
 -- value passed on untouched, never read (widgets take secret values). Works in combat too, if the client allows it.
 local buff_fmt, buff_busy
 local function buff_time_set(fs, fmt, ...)
-    if buff_busy or not (W.is_be() and W.on("ui")) or W.RU or issecretvalue and issecretvalue(fmt) then return end
+    if buff_busy or not (W.is_be() and W.on("spells")) or WoWBY_DB.buff_times == false or W.RU or issecretvalue and issecretvalue(fmt) then return end
     if not buff_fmt then
         buff_fmt = {}
         for k, be in pairs({ DAY_ONELETTER_ABBR = "%d д", HOUR_ONELETTER_ABBR = "%d г", MINUTE_ONELETTER_ABBR = "%d хв",
@@ -908,7 +929,9 @@ function W.hook_buff_times()
     if buff_times_hooked then return end
     for _, c in ipairs({ _G.BuffFrame, _G.DebuffFrame }) do
         for _, b in ipairs(c and c.auraFrames or {}) do
-            if b.Duration then
+            -- R855: auraFrames also holds the PrivateAuraAnchors, whose Duration is no FontString (logged an error at
+            -- every login since R827)
+            if b.Duration and type(b.Duration.SetFormattedText) == "function" then
                 buff_times_hooked = true
                 hooksecurefunc(b.Duration, "SetFormattedText", buff_time_set)
             end
@@ -1223,6 +1246,104 @@ function W.hook_bags()
     end
 end
 W.hook_bags()
+
+-- trade window item names (R915, QA 2026-11-11: "Pellet Rifle" stayed English): TradeFrame_UpdatePlayerItem /
+-- UpdateTargetItem set the name FontString with the EN name → swap by item id (display only, global post-hook)
+local function tr_trade_item(prefix, info, id)
+    if not (W.on("spells") and type(id) == "number" and id ~= TRADE_ENCHANT_SLOT) then return end
+    local fs = _G[prefix .. id .. "Name"]
+    local t = fs and plain(fs:GetText())
+    if not t or t == "" then return end
+    local ok, _, _, _, _, a5, a6, a7, a8 = pcall(info, id)
+    local iid = ok and (prefix == "TradePlayerItem" and a8 or a7)
+    local be = W.item_name_be(t, W.sid_ok(iid) and iid or nil)
+    if be and be ~= t then W.swap(fs, be) end
+end
+local trade_hooked = false
+function W.hook_trade()
+    if trade_hooked or not _G.TradeFrame_UpdatePlayerItem then return end
+    trade_hooked = true
+    hooksecurefunc("TradeFrame_UpdatePlayerItem", function(id) tr_trade_item("TradePlayerItem", GetTradePlayerItemInfo, id) end)
+    hooksecurefunc("TradeFrame_UpdateTargetItem", function(id) tr_trade_item("TradeRecipientItem", GetTradeTargetItemInfo, id) end)
+end
+W.hook_trade()
+
+-- friends / recent allies rows (R930, owner: "first open waits, then updates in a sec or two"): rows come from scroll-box
+-- pools, so the panel walk only met them on its 1 s ticker → swap each row's texts right when Blizzard fills it
+local function tr_row(button)
+    if not (button and W.on("ui")) then return end
+    W.each_fs(button, 3, function(fs)
+        W.friend_row_fs = fs                                        -- retext_fs shortens «Узровень» here (R927)
+        pcall(W.retext_fs, fs)
+        W.friend_row_fs = nil
+    end)
+end
+local friends_hooked, allies_hooked = false, false
+function W.hook_friend_rows()
+    if not friends_hooked and _G.FriendsFrame_UpdateFriendButton then
+        friends_hooked = true
+        hooksecurefunc("FriendsFrame_UpdateFriendButton", tr_row)
+    end
+    if not allies_hooked and _G.RecentAlliesEntryMixin and RecentAlliesEntryMixin.Initialize then
+        allies_hooked = true
+        hooksecurefunc(RecentAlliesEntryMixin, "Initialize", tr_row)
+    end
+end
+W.hook_friend_rows()
+if _G.FriendsFrame then FriendsFrame:HookScript("OnShow", function() W.hook_friend_rows() end) end
+
+-- swing timer bars (R931, owner): "Main Hand" / "Off Hand" / "Ranged" labels, set once by InitializeBarPresentation.
+-- Edit Mode systems (R607: never hook them or write fields) → plain text swap from our own events, out of combat
+local function tr_swing()
+    if not W.on("ui") or InCombatLockdown() then return end
+    for _, n in ipairs({ "SwingTimerMainHandFrame", "SwingTimerOffHandFrame", "SwingTimerRangedFrame" }) do
+        local f = _G[n]
+        local fs = f and f.GetTypeLabel and f:GetTypeLabel()
+        local t = fs and plain(fs:GetText())
+        local be = t and t ~= "" and W.ui_be(t)
+        if be and be ~= t then W.swap(fs, be) end
+    end
+end
+do
+    local sf = CreateFrame("Frame")
+    for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED", "EDIT_MODE_LAYOUTS_UPDATED", "PLAYER_EQUIPMENT_CHANGED" }) do
+        pcall(sf.RegisterEvent, sf, e)
+    end
+    sf:SetScript("OnEvent", function() C_Timer.After(0.5, tr_swing) end)
+end
+
+-- party / raid manager panel (R919, owner 2026-11-11: "Party", "Unit / Ground", "Restrict Pings To:", "Leave Party"):
+-- the panel holds secure raid-marker buttons, so NO per-FontString hooks and no fields on its frames — only a plain
+-- text swap from our own event handler / a next-frame timer, out of combat (the R914 unit-menu taint came from running
+-- inside Blizzard's own call path). Blizzard re-sets the labels on roster updates; we swap again after each one.
+-- words whose shared UI translation means something else here (Ground = «Наземны транспарт» in the mount journal)
+local RM_WORDS = { Unit = "На цэль", Ground = "На зямлю", ["Restrict Pings To:"] = "Сігналы толькі ад:",
+                   ["Leave Instance Group"] = "Пакінуць групу падзямелля" }
+local function tr_raid_manager()
+    local m = _G.CompactRaidFrameManager
+    if not (m and m.displayFrame and W.on("ui")) or InCombatLockdown() then return end
+    W.each_fs(m.displayFrame, 5, function(fs)
+        local t = plain(fs:GetText())
+        if t and t ~= "" and not t:find("^[%d%s/]+$") then
+            local be = RM_WORDS[t] or W.ui_be(t)
+            if be and be ~= t then W.swap(fs, be) end
+        end
+    end)
+end
+local function tr_raid_manager_later() C_Timer.After(0, tr_raid_manager) end
+do
+    local rf = CreateFrame("Frame")
+    rf:RegisterEvent("GROUP_ROSTER_UPDATE")
+    rf:RegisterEvent("PLAYER_ENTERING_WORLD")
+    rf:RegisterEvent("PLAYER_REGEN_ENABLED")
+    rf:SetScript("OnEvent", tr_raid_manager_later)
+    if _G.CompactRaidFrameManager_Expand then hooksecurefunc("CompactRaidFrameManager_Expand", tr_raid_manager_later) end
+end
+do
+    local tf = CreateFrame("Frame")
+    tf:RegisterEvent("TRADE_SHOW")
+    tf:SetScript("OnEvent", function() W.hook_trade() end)
+end
 
 -- objective tracker headers ("All Objectives", "Quests", "Achievements"…): set once at init and by modules
 -- (SetHeader) — swapped after every tracker update (display only; quest titles/lines are done in tracker_post)

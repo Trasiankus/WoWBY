@@ -118,20 +118,24 @@ function W.refresh()
         if _G.QuestInfoObjectivesText and obj then QuestInfoObjectivesText:SetText(obj) end
     end
     W.details_post()
-    if ObjectiveTrackerManager and ObjectiveTrackerManager.UpdateAll then pcall(ObjectiveTrackerManager.UpdateAll, ObjectiveTrackerManager) end
+    -- R889: never ObjectiveTrackerManager:UpdateAll from here (a tainted tracker update aborts in ShouldShowMawBuffs)
+    if W.tracker_retext then W.tracker_retext() end
     for path in pairs(W.hooked) do W.run_panel(W.resolve(path)) end
     if W.spellbook_update then W.spellbook_update() end      -- R389: names back to BE (Blizzard does not re-set them)
 end
--- R160 (owner again 2026-11-05): a newly accepted quest stays out of the objective tracker until the language toggle, whose
--- UpdateAll shows it. Cause still unknown (no error logged, no taint log). Workaround: the same call after QUEST_ACCEPTED,
--- never in combat. If taint errors appear on accepting a quest, this is the first suspect.
+-- R160 (owner 2026-11-05): a newly accepted quest stayed out of the objective tracker until the language toggle.
+-- R889 (owner 2026-11-11): the R160 workaround (ObjectiveTrackerManager:UpdateAll from our timer) WAS the taint — the
+-- tracker update ran tainted, ShouldShowMawBuffs → GetAuraDataByIndex failed (blizz_errors), the update aborted before the
+-- quest module, and finished quests stayed «8/8». Now only a C API call: watch the quest if it is not watched; the engine
+-- then fires QUEST_WATCH_LIST_CHANGED and Blizzard updates the tracker from its own (secure) event handler.
 do
     local f = CreateFrame("Frame")
     f:RegisterEvent("QUEST_ACCEPTED")
-    f:SetScript("OnEvent", function()
+    f:SetScript("OnEvent", function(_, _, qid)
         C_Timer.After(0.3, function()
-            if InCombatLockdown() or not (ObjectiveTrackerManager and ObjectiveTrackerManager.UpdateAll) then return end
-            pcall(ObjectiveTrackerManager.UpdateAll, ObjectiveTrackerManager)
+            if InCombatLockdown() or type(qid) ~= "number" or not C_QuestLog.AddQuestWatch then return end
+            local watched = C_QuestLog.GetQuestWatchType and C_QuestLog.GetQuestWatchType(qid)
+            if watched == nil then pcall(C_QuestLog.AddQuestWatch, qid) end
         end)
     end)
 end

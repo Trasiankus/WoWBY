@@ -190,6 +190,30 @@ def lua_str(s):
     return '"%s"' % s.replace("\\", "\\\\").replace('"', '\\"').replace("\r", "").replace("\n", "\\n")
 
 
+def harvest_seen_lua():
+    """R836 (owner 2026-11-08): what import_harvest already took in (data/harvest.json) → WoWBY_HarvestSeen[locale][kind]
+    [key] = true (quests: [id] = {field = true}); core W.prune_harvest drops those entries at login, so the options
+    counter shows only text collected since the last import."""
+    p = os.path.join(ROOT, "data", "harvest.json")
+    if not os.path.exists(p): return ""
+    def q(s):   # exact key, \r kept (gossip keys can hold CRLF)
+        return '"%s"' % str(s).replace("\\", "\\\\").replace('"', '\\"').replace("\r", "\\r").replace("\n", "\\n")
+    out = ["", "-- R836: harvested text already imported (tools/import_harvest.py); pruned from WoWBY_DB at login",
+           "WoWBY_HarvestSeen = {"]
+    for loc, kinds in sorted(json.load(open(p, encoding="utf-8")).items()):
+        out.append("[%s] = {" % q(loc))
+        for kind, items in sorted(kinds.items()):
+            if kind == "quests":
+                ent = ["[%s]={%s}" % (q(k), ",".join("[%s]=true" % q(f) for f in sorted(v)))
+                       for k, v in sorted(items.items()) if isinstance(v, dict)]
+            else:
+                ent = ["[%s]=true" % q(k) for k in sorted(items)]
+            out.append("  [%s] = {%s}," % (q(kind), ",".join(ent)))
+        out.append("},")
+    out.append("}")
+    return "\n".join(out) + "\n"
+
+
 def lua_pattern(en):
     """EN template -> anchored Lua pattern with one (.-) capture per token, + the token list."""
     out, toks, pos = ["^"], [], 0
@@ -285,8 +309,36 @@ def desc_variants(en, be):
     return uniq
 
 
+def desc_sections(en, be):
+    """R809: a header + a chain of independent optional paragraphs, each `$?a123[text\\n\\n][]`, too many combinations to
+    list (Camp Benefits: 9 camp objects = 512): 'sections={head pattern, head BE, {pattern, parts}, …}', matched paragraph by
+    paragraph at runtime (spells.lua render_sections). None for any other shape."""
+    pa, pb = _cond_parse(en), _cond_parse(be)
+    if not pa or not pb or len(pa) != len(pb) or len(pa) < 3: return None
+    if any(not isinstance(x, str) or x.strip() for x in pa[2::2] + pb[2::2]): return None
+    if not (pa[0].endswith("\n\n") and pb[0].endswith("\n\n")): return None
+    head, toks = lua_pattern(pa[0].rstrip())
+    if toks: return None
+    conds = list(zip(pa[1::2], pb[1::2]))
+    items = []
+    for n, (x, y) in enumerate(conds):
+        if isinstance(x, str) or isinstance(y, str) or len(x) != len(y) or len(x) not in (1, 2): return None
+        if len(x) == 2 and (x[1] != [""] or y[1] != [""]): return None
+        for e, t in _cond_joint(x[0], y[0], [0]) or []:
+            if n < len(conds) - 1 and not (e.endswith("\n\n") and t.endswith("\n\n")): return None
+            pat, toks = lua_pattern(e.rstrip())
+            parts = be_parts(t.rstrip(), toks)
+            if parts is None or pat.endswith("(.-)$") or "$" in pat.replace("%$", "")[:-1]: return None
+            items.append("{%s,{%s}}" % (lua_str(pat[1:-1]), ",".join(parts)))
+    if not items: return None
+    return "sections={%s,%s,%s}" % (lua_str(head[1:-1]), lua_str(pb[0]), ",".join(items))
+
+
 def desc_sd(en, be):
     """SD entry body "pat,{parts}[,pat2,{parts2}…]" or None."""
+    if "$?" in en and desc_variants(en, be) == [(en, be)]:
+        s = desc_sections(en, be)
+        if s: return s
     items = []
     for e, t in desc_variants(en, be):
         pat, toks = lua_pattern(e)
@@ -531,8 +583,18 @@ def quest_guard_lua():
         if os.path.exists(p):
             for qid, q in json.load(open(p, encoding="utf-8")).items():
                 if q.get("t") and qid in scope()["quests"]: titles.setdefault(qid, q["t"])    # R721: no TBC ones
+    # R816: the turtle-bel source title is older than its text: "A Donation of Wool: Undercity" is "A Donation of Wool" in
+    # the game, and the Belarusian already follows it. A fixed reviewed list, so a future title change is still caught.
+    for r in tsv(os.path.join(ROOT, "data", "quest_title_ok.tsv")):
+        if r[0] in titles: titles[r[0]] = r[1]
     s = json.load(open(os.path.join(ROOT, "data", "strings_en.json"), encoding="utf-8"))
     changed = sorted(k[6:] for k, v in s.items() if k.startswith("quest:") and str(v.get("why", "")).startswith("changed"))
+    # R807: only the title's case / spacing changed ("Wanted: X" -> "WANTED: X") and nothing newer was translated: the old
+    # translation stays (quests 169, 176, 387 have a Forever translation, so they are dropped from WoWBY_Q as before)
+    fresh = json.load(open(os.path.join(ROOT, "data", "strings_be.json"), encoding="utf-8"))
+    tkey = lambda t: " ".join((t or "").split()).casefold()
+    changed = [q for q in changed if not (s["quest:" + q]["why"] == "changed:t" and "quest:" + q not in fresh
+                                          and tkey(s["quest:" + q].get("t")) == tkey(titles.get(q)))]
     L = ["-- WoWBY quest guard — GENERATED by tools/build_addon.py",
          "WoWBY_QTitleEN = {}", "local T = WoWBY_QTitleEN"]
     L += ['T["%s"]=%s' % (q, lua_str(t)) for q, t in sorted(titles.items(), key=lambda kv: int(kv[0]))]
@@ -652,6 +714,16 @@ FEM_HEADS = {"Неафіт": "Неафітка", "Следапыт": "Следа
              "Батрак": "Батрачка"}
 
 
+_FORMS = None
+def _forms():
+    """grammardb word forms (ext/slouniki/forms.tsv), loaded once; empty when the file is missing."""
+    global _FORMS
+    if _FORMS is None:
+        p = os.path.join(ROOT, "ext", "slouniki", "forms.tsv")
+        _FORMS = {l.split("\t", 1)[0] for l in open(p, encoding="utf-8")} if os.path.exists(p) else set()
+    return _FORMS
+
+
 def feminine_title(be):
     w = be.split(" ")
     i = 0
@@ -660,7 +732,7 @@ def feminine_title(be):
         w[i] = w[i][:-1] + "ая"                                          # Вялікі, Старэйшы, Выдатны
         i += 1
     head, low = w[i], w[i].lower()
-    rk = re.fullmatch(r"([а-яёіўА-ЯЁІЎ][а-яёіў]+)-(вучань|падмайстар|умелец|рамеснік)", head)
+    rk = re.fullmatch(r"([а-яёіўА-ЯЁІЎ][а-яёіў]+)-(вучань|падмайстар|умелец|рамеснік|пачатковец)", head)
     if rk:
         # profession ranks (owner 2026-09-29): Зачаравальніца-вучаніца / -падмайстар / -умелец / -рамесніца; a
         # profession with no feminine (Алхімік, Каваль, Кравец) keeps the whole title masculine
@@ -670,10 +742,24 @@ def feminine_title(be):
         pf = pf[:1].upper() + pf[1:] if p[:1].isupper() else pf[:1].lower() + pf[1:]
         # R626 (owner: «Бронніца-рамесніца» for all): умелец → умеліца too, «ў» after a vowel («Гарбарка-ўмеліца»,
         # like «паўночна-ўсходні»); падмайстар has no feminine and stays
-        rank = {"вучань": "вучаніца", "рамеснік": "рамесніца", "умелец": "умеліца"}.get(rk.group(2), rk.group(2))
+        # R892 (owner 2026-11-11, female tauren «Ваяр-пачатковец»): пачатковец → пачаткоўка (grammardb ✓; «пачатковіца» ✗)
+        rank = {"вучань": "вучаніца", "рамеснік": "рамесніца", "умелец": "умеліца",
+                "пачатковец": "пачаткоўка"}.get(rk.group(2), rk.group(2))
         if rank.startswith("у") and pf[-1:] in "аеёіоуыэюя": rank = "ў" + rank[1:]
         w[i] = pf + "-" + rank
         return " ".join(w)
+    # R853: the adjective IS the noun («Пасвячоны Пунсовага ордэна», «Паранены»): the loop stopped at a genitive word, or
+    # the name is that one adjective
+    # Only where grammardb knows every feminine made («Калі» → «Калая» is no word).
+    if low not in heads and not re.search(r"(нік|чык)$", low):
+        # short words are mostly names that look like adjectives (Шэры = Sheri, Полі = Polly)
+        made_ok = all(x.lower() in _forms() and len(x) >= 7 for x in w[:i])
+        if i > 0 and re.search(r"(ага|яга|ых|іх)$", low) and made_ok:
+            return " ".join(w)
+        if i == len(w) - 1 and made_ok and len(head) >= 6 and re.fullmatch(r"[а-яёіўА-ЯЁІЎ][а-яёіў'’]+(ы|і)", head) \
+                and (head[:-1] + "ая").lower() in _forms():
+            w[i] = head[:-1] + "ая"
+            return " ".join(w)
     if low in heads:
         f = heads[low]
         w[i] = f if head[:1].isupper() else f[:1].lower() + f[1:]
@@ -842,6 +928,7 @@ def main():
     stale = os.path.join(OUT, "Fonts", "FRIZQT_UA.ttf")
     if os.path.exists(stale): os.remove(stale)
     body, n = forever_lua()
+    body += harvest_seen_lua()
     open(os.path.join(OUT, "data", "forever.lua"), "w", encoding="utf-8", newline="\n").write(body)
     # R510: which English each quest text was made from (core W.quest_variant shows the live English on a real variant)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -883,6 +970,18 @@ def main():
                 if f and f != be: names_f[en] = f
     tl.append("WoWBY_NamesF = {}")
     tl += ['WoWBY_NamesF["%s"]="%s"' % (en, be) for en, be in sorted(names_f.items())]
+    # R854: zone locatives learned from our texts ("Report to X in Brill" → «… у Брыле»), {prep, form}
+    from zone_loc import zone_loc
+    zones = {}
+    for fn, lead in (("zones.lua", "^"), ("forever.lua", "^Z")):
+        pair = re.compile(lead + r'\["((?:[^"\\]|\\.)*)"\]="((?:[^"\\]|\\.)*)",?$', re.M)
+        p = os.path.join(OUT, "data", fn)
+        if os.path.exists(p):
+            zones.update(pair.findall(open(p, encoding="utf-8").read()))
+    zl = zone_loc(zones)
+    tl.append("WoWBY_ZoneLoc = {}")
+    tl += ['WoWBY_ZoneLoc["%s"]={"%s","%s"}' % (en, pr, fm) for en, (pr, fm) in sorted(zl.items())]
+    print("zone locatives:", len(zl), "of", len(zones))
     open(os.path.join(OUT, "data", "titles.lua"), "w", encoding="utf-8", newline="\n").write("\n".join(tl) + "\n")
     # book / letter / plaque pages (R138): translate "books" package -> WoWBY_Books[page key] (core books.lua)
     lp = os.path.join(ROOT, "data", "auto_labels.json")
