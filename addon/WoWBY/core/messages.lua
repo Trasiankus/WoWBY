@@ -148,10 +148,13 @@ local function links_be(t)
             -- a whole profession link "[Enchanting]" (R374) = the profession's UI word
             be = (sb and (pb .. ": " .. sb)) or W.spell_name_be(text) or (kind == "trade" and W.ui_be(text)) or nil
             -- "[Mark of the Wild (Rank 1)]" (learn-a-spell line): the name has no entry with its rank attached (R774)
+            -- R949: also the profession level "[Skinning (Journeyman)]" → «[Здзіранне шкур (Падмайстар)]»
             if not be then
-                local base, rank = text:match("^(.-) %(Rank (%d+)%)$")
+                local base, sub = text:match("^(.-) %((.-)%)$")
                 local bb = base and W.spell_name_be(base)
-                if bb then be = bb .. " (Ранг " .. rank .. ")" end
+                local rank = sub and sub:match("^Rank (%d+)$")
+                local sbe = rank and ("Ранг " .. rank) or (sub and W.ui_be(sub))
+                if bb and sbe then be = bb .. " (" .. sbe .. ")" end
             end
         end
         if be and be ~= text then return open .. "[" .. be .. "]" .. close end
@@ -826,6 +829,29 @@ function W.hook_auction()
         local mx = _G[m]
         if mx and mx.UpdateDisplay then hooksecurefunc(mx, "UpdateDisplay", cell_post) end
     end
+    -- the big item box of the Sell / Buy panels (R946, owner screenshot "Small Egg"): SetItemInternal writes the
+    -- (coloured) name → swap the EN name part by item id. Those boxes exist already (made with the AH frame), so each
+    -- instance is hooked, not the mixin.
+    local function display_post(self)
+        if not (W.is_be() and W.on("spells") and self.Name) or W.dual_on() then return end
+        local t = plain(self.Name:GetText())
+        local link = self.itemLink or (self.GetItemLink and self:GetItemLink())
+        local iid = type(link) == "string" and tonumber(link:match("item:(%d+)"))
+        local en = type(link) == "string" and link:match("|h%[(.-)%]|h")
+        if not (t and en and en ~= "") then return end
+        local be = W.item_name_be(en, iid)
+        if not be or be == en then return end
+        local s, e = t:find(en, 1, true)
+        if s then W.swap(self.Name, t:sub(1, s - 1) .. be .. t:sub(e + 1)) end
+    end
+    local seen_disp = {}
+    local function hook_displays(f, depth)
+        if not f or depth > 4 or seen_disp[f] then return end
+        seen_disp[f] = true
+        if f.SetItemInternal and f.Name then hooksecurefunc(f, "SetItemInternal", display_post) end
+        for _, c in ipairs({ f:GetChildren() }) do hook_displays(c, depth + 1) end
+    end
+    if ahf then pcall(hook_displays, ahf, 0) end
 end
 -- Mirror timer bars (R67: "Breath", "Fatigue", feign death): the label comes with MIRROR_TIMER_START and is set once in
 -- MirrorTimerMixin:Setup. MirrorTimerContainer is an Edit Mode system frame → no hooks on it: OUR event handler, next
@@ -892,6 +918,20 @@ do
     f:SetScript("OnEvent", function(_, _, initial)
         if initial then
             C_Timer.After(1, tr_safety_notice); C_Timer.After(4, tr_safety_notice)
+        end
+    end)
+end
+-- other lines Blizzard writes straight into chat with ChatFrameUtil.AddSystemMessage (R948, owner screenshot "Auction
+-- created." = ERR_AUCTION_STARTED from the auction house): past the chat filters → after the call, the line just added
+-- to the default chat window is rewritten (same TransformMessages way as the safety notice)
+if _G.ChatFrameUtil and ChatFrameUtil.AddSystemMessage then
+    hooksecurefunc(ChatFrameUtil, "AddSystemMessage", function(msg)
+        local en = plain(msg)
+        if not (en and en ~= "" and W.is_be() and W.on("ui")) or W.ours(en) then return end
+        local be = W.ui_be(en)
+        local cf = _G.DEFAULT_CHAT_FRAME
+        if be and be ~= en and cf and cf.TransformMessages then
+            pcall(cf.TransformMessages, cf, function(t) return plain(t) == en end, function(_, ...) return be, ... end)
         end
     end)
 end
@@ -1268,6 +1308,33 @@ function W.hook_trade()
 end
 W.hook_trade()
 
+-- group loot roll frames (R944, owner screenshot "Malachite"): GroupLootFrame_SetupItemDisplay sets Name from
+-- GetLootRollItemInfo → swap by the roll's item link id (plain text swap, no fields on the frame)
+local function tr_loot_roll(self)
+    if not (self and self.rollID and self.Name and W.on("names")) then return end
+    local en = plain(self.Name:GetText())
+    if not en or en == "" or W.ours(en) then return end
+    local link = GetLootRollItemLink and GetLootRollItemLink(self.rollID)
+    local iid = link and tonumber(link:match("item:(%d+)"))
+    local be = W.item_name_be(en, iid)
+    if be and be ~= en then W.set_font(self.Name); W.swap(self.Name, be) end
+end
+local roll_hooked = false
+local function hook_loot_roll()
+    if roll_hooked or not _G.GroupLootFrame_SetupItemDisplay then return end
+    roll_hooked = true
+    hooksecurefunc("GroupLootFrame_SetupItemDisplay", tr_loot_roll)
+end
+hook_loot_roll()
+if not roll_hooked then                     -- Blizzard_UIPanels_Game may load after us
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN"); f:RegisterEvent("START_LOOT_ROLL")
+    f:SetScript("OnEvent", function(self)
+        hook_loot_roll()
+        if roll_hooked then self:UnregisterAllEvents() end
+    end)
+end
+
 -- friends / recent allies rows (R930, owner: "first open waits, then updates in a sec or two"): rows come from scroll-box
 -- pools, so the panel walk only met them on its 1 s ticker → swap each row's texts right when Blizzard fills it
 local function tr_row(button)
@@ -1277,6 +1344,33 @@ local function tr_row(button)
         pcall(W.retext_fs, fs)
         W.friend_row_fs = nil
     end)
+    -- recent allies (R939, owner screenshot "Уз…"): SetCharacterLevel sized the Level string to the ENGLISH text; refit
+    local lv = button.CharacterData and button.CharacterData.Level
+    if lv and lv.GetUnboundedStringWidth then pcall(lv.SetWidth, lv, lv:GetUnboundedStringWidth() + 1) end
+end
+
+-- recent-ally tooltip (R939): "Fought Together - Durotar" (RECENT_ALLY_TOOLTIP_INTERACTION_WITH_CONTEXT_FORMAT "%s - %s",
+-- both parts known) and "< 1 Hour ago" on the right
+local function tr_ally_tooltip()
+    local tt = GameTooltip
+    if not (W.on("ui") and tt and tt:IsShown()) then return end
+    for i = 1, tt:NumLines() do
+        for _, side in ipairs({ "Left", "Right" }) do
+            local fs = _G["GameTooltipText" .. side .. i]
+            local t = fs and plain(fs:GetText())
+            if t and t ~= "" and not W.ours(t) then
+                local be = W.ui_be(t)
+                if not be then
+                    local a, b = t:match("^(.-) %- (.+)$")
+                    local ba = a and W.ui_be(a)
+                    local bb = b and (W.Z[b] or W.ui_be(b))
+                    if ba and bb then be = ba .. " — " .. bb end
+                end
+                if be then fs:SetText(be) end
+            end
+        end
+    end
+    tt:Show()
 end
 local friends_hooked, allies_hooked = false, false
 function W.hook_friend_rows()
@@ -1287,6 +1381,7 @@ function W.hook_friend_rows()
     if not allies_hooked and _G.RecentAlliesEntryMixin and RecentAlliesEntryMixin.Initialize then
         allies_hooked = true
         hooksecurefunc(RecentAlliesEntryMixin, "Initialize", tr_row)
+        if RecentAlliesEntryMixin.ShowTooltip then hooksecurefunc(RecentAlliesEntryMixin, "ShowTooltip", tr_ally_tooltip) end
     end
 end
 W.hook_friend_rows()

@@ -140,6 +140,16 @@ def forever_lua():
             if len(r) >= 2 and r[1]:
                 lines.append('WoWBY_Gossip["%s"]="%s"' % (esc(r[0]), esc(cget("hand", "gossip:" + r[0], r[1]))))
                 n["gossip_fix"] = n.get("gossip_fix", 0) + 1
+    # R943: quest text variants (another class / race / sex sees another text; harvested as "<field>#<hash>", core
+    # W.variant_be): data/quest_variants_be.tsv (qid, key, be, en) → WoWBY_QVar[qid][key]
+    lines.append("WoWBY_QVar = WoWBY_QVar or {}")
+    fv = os.path.join(ROOT, "data", "quest_variants_be.tsv")
+    if os.path.exists(fv):
+        for r in tsv(fv):
+            if len(r) >= 3 and r[2]:
+                lines.append('WoWBY_QVar["%s"]=WoWBY_QVar["%s"] or {}; WoWBY_QVar["%s"]["%s"]="%s"'
+                             % (r[0], r[0], r[0], r[1], esc(cget("forever", "qvar:%s.%s" % (r[0], r[1]), r[2]))))
+                n["quest_variants"] = n.get("quest_variants", 0) + 1
     # whole objective lines the server sends (tracker / quest log): exact EN -> BE (core obj_line_be)
     lines.append("WoWBY_Objectives = WoWBY_Objectives or {}")
     fo = os.path.join(ROOT, "data", "objectives_fix.tsv")
@@ -670,7 +680,8 @@ def fmt_parts(be, n, argmap=None):
 
 # NPC title -> feminine (owner 2026-09-26: «Настаўніца ваяроў» for female trainers). Only the leading adjectives
 # and the head noun change; the rest (genitive complements) stays. Unknown heads -> no feminine (masculine shown).
-FEM_HEADS = {"Неафіт": "Неафітка", "Следапыт": "Следапытка", "Гандляр": "Гандлярка", "Інтэндант": "Інтэндантка", "Уладар": "Уладарка", "Вучань": "Вучаніца",
+FEM_HEADS = {"Матрос": "Матроска",   # R941 owner: female Kul Tiras Sailor
+             "Неафіт": "Неафітка", "Следапыт": "Следапытка", "Гандляр": "Гандлярка", "Інтэндант": "Інтэндантка", "Уладар": "Уладарка", "Вучань": "Вучаніца",
              "Інструктар": "Інструктарка", "Арганізатар": "Арганізатарка", "Лукар": "Лукарка", "Друід": "Друідка",
              "Інжынер": "Інжынерка", "Паслугач": "Паслугачка", "Карчмар": "Карчмарка", "Кухар": "Кухарка",
              "Паляўнічы": "Паляўнічая", "Ваяр": "Ваярка", "Жрэц": "Жрыца", "Шаман": "Шаманка", "Пасол": "Пасланніца",

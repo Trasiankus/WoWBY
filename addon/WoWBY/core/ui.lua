@@ -51,6 +51,11 @@ local UI_HAND = {
     Elite = "Эліта", Rare = "Рэдкі", ["Rare Elite"] = "Рэдкая эліта", Boss = "Бос",   -- owner: (Эліта)
     -- Battle.net friend's rich presence (server text, R929): a friend in the launcher app
     ["In App"] = "У праграме",
+    -- recent allies tooltip time (SecondsFormatter "< 1 Hour" + "%s ago", R939)
+    ["< 1 Hour ago"] = "менш за гадзіну таму", ["< 1 Hour"] = "менш за гадзіну",
+    -- Settings > Social "Preferred online language" (engine locale names, not GlobalStrings, R938)
+    ["European Spanish"] = "Еўрапейская іспанская", ["Latin American Spanish"] = "Лацінаамерыканская іспанская",
+    ["European Portuguese"] = "Еўрапейская партугальская", ["Brazilian Portuguese"] = "Бразільская партугальская",
 }
 for en, be in pairs(UI_HAND) do W.UI[en] = be end
 -- "Must have a Fishing Pole equipped" (SPELL_FAILED_EQUIPPED_ITEM_CLASS*, R918 owner 2026-11-11: «Вы павінны трымаць у
@@ -505,6 +510,9 @@ local LANG = { Orcish = "Орцкая", Darnassian = "Дарнаская", Taura
                Gutterspeak = "Наўская", Pandaren = "Пандарэнская", ["Shen'dorei"] = "Шэн'дарайская" }
 if W.ru_alias then W.ru_alias(LANG, "ui") end         -- ruRU client: Russian language names (R665)
 W.LANG = LANG                                         -- also the "You are fluent in…" spell lists (tooltips, R387)
+-- auction house words that differ from the same EN elsewhere (R945, owner: "Deposit" here is the fee, glossary R790
+-- «заклад»; the bank button "Deposit" stays «Пакласці»)
+local AH_LABELS = { Deposit = "Заклад" }
 local fs_ctx = setmetatable({}, { __mode = "k" })     -- FontString -> "prof" (profession window) / "names" (Legacy window)
 -- recipe list rows (R654): ProfessionsRecipeListRecipeMixin:Init sizes the Label to the text it just set; rows made on
 -- the first open are hooked only after that → the label kept the EN width («Простае вог…»). Re-measure as Init does.
@@ -551,7 +559,8 @@ function W.retext_fs(fs, no_font)                    -- no_font: menu regions (S
     if W.on("ui") then
         -- character sheet "Level 3 Druid" of a female character → «Друідка» (owner 2026-10-12, R442)
         W.current_tooltip_female = fs == _G.CharacterLevelText and UnitSex("player") == 3
-        local be = (no_font and LANG[t]) or W.label_be(t) or (fs_ctx[fs] == "prof" and prof_be(t))
+        local be = (no_font and LANG[t]) or (fs_ctx[fs] == "ah" and AH_LABELS[t]) or W.label_be(t)
+            or (fs_ctx[fs] == "prof" and prof_be(t))
             or (fs_ctx[fs] == "names" and item_or_spell(t))      -- Legacy window: reward items, tree talents (R273)
             -- Collections (R698): mount / pet / toy names in the lists and the detail header — mounts and toys are spell /
             -- item names, battle pets NPC names («Міні-Дыябла»)
@@ -695,7 +704,8 @@ end
 function W.run_panel(frame, hidden_ok)               -- walks the tree: hooks new FontStrings, translates them
     local ctx = frame and (frame == _G.ProfessionsFrame and "prof" or frame == _G.LegacySystemFrame and "names"
                            or frame == _G.CollectionsJournal and "collections"
-                           or frame == _G.FriendsFrame and "friends") or nil
+                           or frame == _G.FriendsFrame and "friends"
+                           or frame == _G.AuctionHouseFrame and "ah") or nil
     if frame and frame.IsForbidden and frame:IsForbidden() then return end          -- R243: forbidden frames
     if frame and (hidden_ok or frame:IsShown()) and not InCombatLockdown() then retext_tree(frame, ctx) end
 end

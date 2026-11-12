@@ -492,6 +492,12 @@ local function tr_quest_tooltip(tt, qid_hint)
         if rest then oc, oinner, orr = obj_colour(rest) end
         local b = rest and qid and W.obj_line_be(oinner or rest, qid)
         if b then fs:SetText("- " .. (oc and (oc .. b .. orr) or b)); changed = true end     -- colour kept (R524)
+        -- R942 (owner screenshot): a quest with no objective rows shows its objectives SENTENCE without the dash
+        -- ("Speak with Cairne Bloodhoof in Thunder Bluff.") → the quest's BE "o"
+        if not rest and lt and lt ~= "" and qid and not W.ours(lt) and not lt:find("^<") then
+            local b2 = W.obj_line_be(lt, qid)
+            if b2 then W.set_font(fs); fs:SetText(b2); changed = true end
+        end
     end
     return changed
 end

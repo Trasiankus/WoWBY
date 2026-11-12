@@ -176,16 +176,43 @@ def status():
                             os.path.splitext(os.path.basename(p))[0]))
 
 
+def publish():
+    """Public GitHub repo (owner 2026-11-12: "always when we build push to git"): tools/make_public_repo.py → publish/WoWBY,
+    commit "<version>: <changelog headline>" (release/CHANGELOG-<version>.md, first bullet), push. Only publish/WoWBY is
+    pushed; this repo stays local."""
+    import re, subprocess
+    print(run("public repo", ["tools/make_public_repo.py"], capture=True))
+    pub = os.path.join(ROOT, "publish", "WoWBY")
+    toc = open(os.path.join(ROOT, "addon", "WoWBY", "WoWBY.toc"), encoding="utf-8").read()
+    ver = (re.search(r"^## Version:\s*(\S+)", toc, re.M) or [None, "?"])[1]
+    msg = ver
+    cl = os.path.join(ROOT, "release", "CHANGELOG-%s.md" % ver)
+    if os.path.exists(cl):
+        first = re.search(r"^- (.+)$", open(cl, encoding="utf-8").read(), re.M)
+        if first:
+            msg = "%s: %s" % (ver, re.sub(r"\s+", " ", first.group(1))[:150])
+    git = lambda *a: subprocess.run(["git", *a], cwd=pub, capture_output=True, text=True, encoding="utf-8")
+    git("add", "-A")
+    if not git("status", "--porcelain").stdout.strip():
+        print("public repo: nothing changed"); return
+    r = git("commit", "-m", msg)
+    print(r.stdout.strip().splitlines()[0] if r.returncode == 0 else r.stderr)
+    r = git("push")
+    print("pushed" if r.returncode == 0 else "PUSH FAILED: " + r.stderr)
+
+
 def release():
-    """CurseForge zip: the usual addon step, then release/WoWBY-<version>.zip (tools/package_release.py)."""
+    """CurseForge zip: the usual addon step, then release/WoWBY-<version>.zip (tools/package_release.py), then the
+    public repo push (publish)."""
     addon()
     print(run("CurseForge zip", ["tools/package_release.py"], capture=True))
+    publish()
 
 
 if __name__ == "__main__":
     cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("", [])
     try:
-        {"queue": queue, "addon": addon, "status": status, "scrape": lambda: scrape(rest), "release": release}.get(
+        {"queue": queue, "addon": addon, "status": status, "scrape": lambda: scrape(rest), "release": release, "publish": publish}.get(
             cmd, lambda: sys.exit(__doc__))()
     except KeyboardInterrupt:                                # Ctrl+C: a pause, not an error (every step resumes)
         print("\nPaused. Run it again to continue where it stopped.")

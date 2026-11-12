@@ -67,6 +67,16 @@ function W.quest_variant(qid, field, text, harvest)
     end
     return c.v
 end
+-- R943: the Belarusian of a known variant (WoWBY_QVar[qid]["d#<hash>"], data/quest_variants_be.tsv): the same key the
+-- harvest wrote, so a translated variant shows instead of the live English
+function W.variant_be(qid, field, text)
+    local v = qid and WoWBY_QVar and WoWBY_QVar[tostring(qid)]
+    local t = v and plain(text)
+    if not t then return nil end
+    local tokens = W.player_tokens and W.player_tokens(t) or t
+    local be = v[field .. "#" .. sent_hash(sig_letters(tokens))]
+    return be and W.substitute(be, qid, t)
+end
 
 local function wrap(name, field)
     orig[name] = _G[name]
@@ -78,7 +88,11 @@ local function wrap(name, field)
             if W.needs_harvest(qid, field) then W.harvest_quest(qid, field, text) end
             if W.is_be() then
                 local e = W.entry_for(qid)
-                if e and e[field] and not W.quest_variant(qid, field, text) then return W.substitute(e[field], qid, text) end
+                if e and e[field] then
+                    if not W.quest_variant(qid, field, text) then return W.substitute(e[field], qid, text) end
+                    local vb = W.variant_be(qid, field, text)
+                    if vb then return vb end
+                end
             end
         end
         return text
@@ -122,7 +136,7 @@ function W.dui_quest_data(qid)
         if e[f[2]] then
             -- no live text (not the quest in the dialog): nothing to compare, the translation stands
             if type(en) == "string" and W.quest_variant(qid, f[2], en) then
-                out[f[1]] = en                                   -- R510: DialogueUI shows this field in English
+                out[f[1]] = W.variant_be(qid, f[2], en) or en   -- R510: DialogueUI shows this field in English (R943: unless translated)
             else
                 out[f[1]] = W.substitute(e[f[2]], qid, type(en) == "string" and en or nil)
             end
@@ -144,8 +158,9 @@ if orig.GetQuestLogQuestText then
         if W.is_be() then
             local e = W.entry_for(qid)
             if e then
-                if e.d and type(desc) == "string" and not W.quest_variant(qid, "d", desc, true) then
-                    desc = W.substitute(e.d, qid, desc)
+                if e.d and type(desc) == "string" then
+                    if not W.quest_variant(qid, "d", desc, true) then desc = W.substitute(e.d, qid, desc)
+                    else desc = W.variant_be(qid, "d", desc) or desc end
                 end
                 if e.o and type(obj) == "string" then obj = W.substitute(e.o, qid, obj) end
                 local box = QuestScrollFrame and QuestScrollFrame.SearchBox
@@ -662,3 +677,54 @@ function W.details_post()
 end
 if _G.QuestMapFrame_UpdateQuestDetailsButtons then hooksecurefunc("QuestMapFrame_UpdateQuestDetailsButtons", function(...) pcall(W.details_post, ...) end) end
 if _G.QuestInfo_Display then hooksecurefunc("QuestInfo_Display", function(...) pcall(W.details_post, ...) end) end
+
+-- quest greeting panel (R936, QA 2026-11-11: Gar'Thok — an NPC with several quests shows a greeting + "Current Quests" /
+-- "Available Quests" lists — all stayed English in Blizzard's QuestFrame; DialogueUI users never saw it). OnShow fills it
+-- from GetGreetingText / GetActiveTitle / GetAvailableTitle → post-hook (HookScript, display only): greeting via
+-- WoWBY_Gossip, the two headers via the UI words, each title button's EN title swapped for the BE one, height refit.
+local function tr_greeting()
+    if not (W.is_be() and W.on("quests")) then return end
+    local gt = _G.GreetingText
+    local t = gt and plain(gt:GetText())
+    local be = t and t ~= "" and W.gossip_be(t)
+    if be and be ~= t then W.set_font(gt); W.swap(gt, be) end
+    for _, n in ipairs({ "CurrentQuestsText", "AvailableQuestsText" }) do
+        local fs = _G[n]
+        local h = fs and plain(fs:GetText())
+        local hb = h and W.ui_be(h)
+        if hb and hb ~= h then W.set_font(fs); W.swap(fs, hb) end
+    end
+    local panel = _G.QuestFrameGreetingPanel
+    local pool = panel and panel.titleButtonPool
+    if not (pool and pool.EnumerateActive) then return end
+    local nact = GetNumActiveQuests and GetNumActiveQuests() or 0
+    for btn in pool:EnumerateActive() do
+        local id = btn.GetID and btn:GetID()
+        local en, qid
+        if btn.isActive == 1 then
+            en = GetActiveTitle and GetActiveTitle(id)
+            qid = GetActiveQuestID and GetActiveQuestID(id)
+        elseif id and GetAvailableTitle then
+            -- available buttons already carry the index within the AVAILABLE list (SetID(i - numActiveQuests))
+            en = GetAvailableTitle(id)
+            qid = GetAvailableQuestInfo and select(5, GetAvailableQuestInfo(id))
+        end
+        en = plain(en)
+        local fs = btn.GetFontString and btn:GetFontString()
+        local cur = fs and plain(fs:GetText())
+        local tb = en and ((W.sid_ok(qid) and W.be_title(qid)) or (W.qtitle_be and W.qtitle_be(en)))
+        if cur and tb and tb ~= en then
+            local s, e = cur:find(en, 1, true)
+            if s then
+                W.set_font(fs)
+                W.swap(fs, cur:sub(1, s - 1) .. tb .. cur:sub(e + 1))
+                if btn.Icon and btn.GetTextHeight then
+                    btn:SetHeight(math.max(btn:GetTextHeight() + 2, btn.Icon:GetHeight()))
+                end
+            end
+        end
+    end
+end
+if _G.QuestFrameGreetingPanel then
+    QuestFrameGreetingPanel:HookScript("OnShow", function() pcall(tr_greeting) end)
+end
