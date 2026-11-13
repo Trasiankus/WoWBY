@@ -705,6 +705,9 @@ local PANELS = { "SettingsPanel", "CharacterFrame", "FriendsFrame", "MerchantFra
                  -- R740: barbershop (load-on-demand): option labels "Hair Style" / "Beard" and the selected style name
                  -- (ChrCustomization* / BarberShopStyle via the UI dictionary; the style lists are Blizzard_Menu rows)
                  "BarberShopFrame", "CharCustomizeFrame",
+                 -- R988 (owner screenshots 2026-11-13): Forever's transmog window (Blizzard_Transmog, load-on-demand) —
+                 -- "Hide Ignored Slots", "Save Outfit", slot headers… were in the dictionary, the frame was never walked
+                 "TransmogFrame",
                  -- (NOT CommunitiesAddDialog: a FORBIDDEN frame — HookScript / IsShown raised errors, R243)
                  }
 function W.resolve(path)
@@ -988,6 +991,9 @@ local function tr_popup(which, data)
         local ok, be = pcall(W.ui_be, t2)
         W.any_name = false
         be = (ok and be) or (t2 ~= t and t2) or nil
+        -- R988: gossip confirmations (GOSSIP_CONFIRM: "By enabling transmogrification…") carry the server's text → the
+        -- gossip table (data/gossip_fix.tsv)
+        if not be and W.on("quests") and W.gossip_be then be = W.gossip_be(t) end
         if be and be ~= t then W.set_font(fs); W.swap(fs, be) end
     end
     for _, b in ipairs(dialog.GetButtons and dialog:GetButtons() or {}) do

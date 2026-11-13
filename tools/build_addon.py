@@ -706,6 +706,9 @@ FEM_HEADS = {"Матрос": "Матроска",   # R941 owner: female Kul Tira
              "Рыбалоў": "Рыбачка", "Збіральнік": "Збіральніца", "Кур'ер": "Кур'ерка", "Студэнт": "Студэнтка",
              # R626: common-gender head (the rank still turns: «Травазнаўца-вучаніца»)
              "Травазнаўца": "Травазнаўца",
+             # R987 (owner screenshot: female Orgrimmar Grunt): рубака is common gender → only the adjective turns
+             # («Аргрымарская рубака»)
+             "Рубака": "Рубака",
              # R468: mob names made masculine again (review/fem_mobs.py) need their feminine back for female NPCs
              "Засаднік": "Засадніца", "Нападнік": "Нападніца", "Галаварэз": "Галаварэзка", "Пяхотнік": "Пяхотніца",
              "Рабаўнік": "Рабаўніца", "Святар": "Святарка",

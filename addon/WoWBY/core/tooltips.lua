@@ -824,7 +824,9 @@ end
 -- plain-text tooltips (no tooltip data): GameTooltip + separate tooltip frames, e.g. SettingsTooltip (options
 -- panel, built with AddLine) — hooked as they appear (some come with load-on-demand addons)
 local TOOLTIPS = { "GameTooltip", "SettingsTooltip", "ItemRefTooltip", "EmbeddedItemTooltip",
-                   "ShoppingTooltip1", "ShoppingTooltip2" }       -- + item comparison (R114)
+                   "ShoppingTooltip1", "ShoppingTooltip2",        -- + item comparison (R114)
+                   -- R988: barbershop / customization buttons ("Reset Camera", "Body 1", "Tauren Form"; load-on-demand)
+                   "CustomizationNoHeaderTooltip" }
 local tt_hooked = {}
 -- item comparison (R117): the delta block ("If you replace this item…", "+4 Agility") is re-added on every comparison
 -- refresh; translating on show left it English for a frame each time → blink. Swap right after SetItemTooltip.
