@@ -575,14 +575,14 @@ local function log_list_post()
             tr_obj_fs(ob.Text, ob.questID)
         end
     end
-    if grew and QuestScrollFrame.Contents and QuestScrollFrame.Contents.Layout then QuestScrollFrame.Contents:Layout() end
-    if new_hooks and not log_rerun then                 -- re-measure once with the new hooks (next frame, not nested)
-        log_rerun = true
-        C_Timer.After(0, function()
-            if QuestMapFrame and QuestMapFrame:IsShown() and QuestLogQuests_Update then QuestLogQuests_Update() end
-            log_rerun = false
-        end)
+    if grew and not InCombatLockdown() and QuestScrollFrame.Contents and QuestScrollFrame.Contents.Layout then
+        QuestScrollFrame.Contents:Layout()
     end
+    -- R978 (taint.log 2026-11-13): the re-measure pass that CALLED QuestLogQuests_Update() from our timer ran Blizzard's
+    -- whole quest-log rebuild tainted → its POI buttons (questID, style, …) were written by WoWBY → in combat their
+    -- SetPassThroughButtons was blocked ("Interface action failed", ADDON_ACTION_BLOCKED, tracker gaps). Never call it:
+    -- rows hooked just now get their Belarusian on Blizzard's next own update.
+    local _ = new_hooks or log_rerun
 end
 if _G.QuestLogQuests_Update then hooksecurefunc("QuestLogQuests_Update", function(...) pcall(log_list_post, ...) end) end
 

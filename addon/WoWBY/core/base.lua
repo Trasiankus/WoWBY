@@ -739,6 +739,9 @@ gossip_other_name = function(t)
 end
 gossip_norm = function(s)
     s = s:gsub("\r", ""):gsub("%$[Bb]", "\n"):gsub("%$([nrc])", function(c) return "$" .. c:upper() end)
+    -- R976 (owner screenshot, Master Gadrin): the server's "I thank you, $N." vs our key "I thank you $N." — commas
+    -- don't count either (both sides of the index go through here)
+    s = s:gsub(",", "")
     return W.strtrim((s:gsub("[ \t]+", " "):gsub(" *\n *", "\n")))
 end
 local GN

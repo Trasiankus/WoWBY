@@ -616,13 +616,13 @@ end
 -- Belarusian search (R368): the server matches EN names only → a query with Cyrillic is turned into EN after
 -- Blizzard sent it (that one finds nothing): the item names whose BE contains the query (IE), then the EN word
 -- most of them share ("мурлац" → "Murloc"), or the full EN name for a single / exact match; re-searched once
-local function ah_term(q)
+local function ah_term(q, src)
     local ql = cyr_lower(W.strtrim(q))
     if #ql < 4 then return nil end
     local hits, exact = {}, nil
     -- a typed stem may end in a letter the names change («мурлац» vs «мурлака»): drop up to 2 letters if nothing hit
     for _ = 0, 2 do
-        for en, be in pairs(W.IE or {}) do
+        for en, be in pairs(src or W.IE or {}) do
             local bl = cyr_lower(be)
             if bl == ql then exact = en; break end
             if bl:find(ql, 1, true) then hits[#hits + 1] = en end
@@ -672,6 +672,42 @@ local function ah_term(q)
     return best
 end
 W.ah_term = ah_term
+
+-- R973 (owner 2026-11-13: "improve spellbooks and professions"): the recipe search box ends in ONE plain C call,
+-- C_TradeSkillUI.SetRecipeItemNameFilter(text) (Professions.OnRecipeListSearchTextChanged), which matches English only.
+-- Post-hook: a Cyrillic query → the EN term the open profession's recipe names share (same picker as the auction house:
+-- exact / single name, else the most shared word) → the same C call again. No Blizzard frame or field is touched.
+-- The spellbook is NOT done this way: its search controller drives the secure spell buttons (taint → blocked casts).
+local prof_hooked = false
+local function prof_names()
+    local t = {}
+    if not (C_TradeSkillUI and C_TradeSkillUI.GetAllRecipeIDs) then return t end
+    for _, rid in ipairs(C_TradeSkillUI.GetAllRecipeIDs() or {}) do
+        local info = C_TradeSkillUI.GetRecipeInfo(rid)
+        local en = info and plain(info.name)
+        if en then
+            local be = (W.SN and W.SN[rid]) or W.IE[en] or (W.spell_name_be and W.spell_name_be(en))
+            if be and be ~= en then t[en] = be end
+        end
+    end
+    return t
+end
+function W.hook_prof_search()
+    if prof_hooked or not (_G.Professions and _G.Professions.OnRecipeListSearchTextChanged) then return end
+    prof_hooked = true
+    hooksecurefunc(_G.Professions, "OnRecipeListSearchTextChanged", function(text)
+        local q = plain(text)
+        if not (q and W.on("spells") and q:find("[\208\209]")) then return end
+        local ok, en = pcall(ah_term, q, prof_names())
+        if ok and en and C_TradeSkillUI.SetRecipeItemNameFilter then C_TradeSkillUI.SetRecipeItemNameFilter(en) end
+    end)
+end
+do
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("ADDON_LOADED")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function() if not prof_hooked then pcall(W.hook_prof_search) end end)
+end
 -- bag / bank search in Belarusian (R519): the engine matches EN item names → after Blizzard's own SetItemSearch, a query
 -- with Cyrillic is re-sent as its EN word («слаб» → "minor"); English queries are left alone
 local bagsearch_hooked = false

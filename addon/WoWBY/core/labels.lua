@@ -101,7 +101,8 @@ function W.refresh()
     if gf and gf:IsShown() and gf.Update and not InCombatLockdown() then
         C_Timer.After(0, function() if gf:IsShown() then pcall(gf.Update, gf) end end)
     end
-    if QuestMapFrame and QuestMapFrame:IsShown() and QuestLogQuests_Update then QuestLogQuests_Update() end
+    -- R978: no QuestLogQuests_Update() from here — run by addon code it rebuilt the quest log (and its POI buttons)
+    -- tainted; blocked in combat later. The open log shows the new language on its next own update.
     -- R384/R406: the open quest details are filled by Blizzard through our getter wraps → after a language switch their
     -- texts are written back with plain SetText from the getters (now answering in the new language). NOT by calling
     -- QuestMapFrame_ShowQuestDetails / NavBar:Refresh from here: that ran Blizzard's panel code from addon code, the

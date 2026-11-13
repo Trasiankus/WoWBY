@@ -404,7 +404,8 @@ function W.ui_be(t, depth)
     -- R961 (owner 2026-11-13): a label with its key binding, "Interact With Target (Z)", "Show nameplates for enemy units
     -- (V)", "World Map (M)": the label translates, the key stays as the keyboard has it (Space = «Прабел», R779)
     local base, key
-    if p then base, key = p:match("^(.-) %(([^()]+)%)$") end
+    -- cheap guard first: ui_be runs on every label / tooltip line miss, and the lazy pattern backtracks on long texts
+    if p and #p < 120 and p:byte(-1) == 41 then base, key = p:match("^(.-) %(([^()]+)%)$") end
     if base and (key:find("^[%u%d][%u%d%-]*$") or KEY_WORDS[key]) then
         local b = ui_be_one(base)
         if b then return b .. " (" .. (KEY_WORDS[key] or key) .. ")" end

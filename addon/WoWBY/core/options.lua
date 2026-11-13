@@ -412,6 +412,58 @@ end
 SlashCmdList["WOWBY"] = function(msg)
     msg = W.strtrim((msg or ""):lower())
     if msg == "demo" or msg == "demo off" then demo_harvest(msg == "demo"); return end
+    -- R975 (owner 2026-11-13: stutters while moving / questing): which WoWBY functions eat the CPU. Needs the game's
+    -- script profiler: /console scriptProfile 1 → /reload → play a few minutes → /wowby perf (saved to WoWBY_DB.perf).
+    -- Switch the profiler off afterwards (/console scriptProfile 0 + /reload): it slows every addon down.
+    -- R977: this client's script profiler gives 0 ms; Blizzard's addon profiler (C_AddOnProfiler, always on) counts
+    -- the frames where an addon took over 1 / 5 / 10 / 50 / 100 ms = the stutters → WoWBY vs the top addons
+    if msg == "perf" and C_AddOnProfiler and C_AddOnProfiler.GetAddOnMetric and Enum and Enum.AddOnProfilerMetric then
+        local out = {}
+        local function line(s) print("  " .. s); out[#out + 1] = s end
+        print("|cff33ff99WoWBY perf|r (" .. ("%.0f"):format(GetTime()) .. " s, addon profiler):")
+        local names = {}
+        for k, v in pairs(Enum.AddOnProfilerMetric) do names[#names + 1] = { k, v } end
+        table.sort(names, function(a, b) return a[2] < b[2] end)
+        for _, m in ipairs(names) do
+            local ok, mine = pcall(C_AddOnProfiler.GetAddOnMetric, "WoWBY", m[2])
+            local ok2, all = pcall(C_AddOnProfiler.GetOverallMetric, m[2])
+            if ok then line(("%-22s WoWBY %10.2f   all addons %10.2f"):format(m[1], mine or 0, ok2 and all or 0)) end
+        end
+        if C_AddOnProfiler.GetTopKAddOnsForMetric and Enum.AddOnProfilerMetric.RecentAverageTime then
+            local ok, top = pcall(C_AddOnProfiler.GetTopKAddOnsForMetric, Enum.AddOnProfilerMetric.RecentAverageTime, 5)
+            if ok and type(top) == "table" then
+                for i, r in ipairs(top) do
+                    line(("top %d: %s %.3f ms"):format(i, tostring(r.addOnName or r.name or r[1]), tonumber(r.metricValue or r.value or r[2]) or 0))
+                end
+            end
+        end
+        WoWBY_DB.perf = out
+        return
+    end
+    if msg == "perf" then
+        if not (GetCVarBool and GetCVarBool("scriptProfile")) then
+            print("|cff33ff99WoWBY|r: спачатку /console scriptProfile 1 і /reload, потым пагуляйце некалькі хвілін")
+            return
+        end
+        UpdateAddOnCPUUsage()
+        local rows = {}
+        for name, fn in pairs(W) do
+            if type(fn) == "function" then
+                local ok, ms, calls = pcall(GetFunctionCPUUsage, fn, true)
+                if ok and ms and ms > 0 then rows[#rows + 1] = { name, ms, calls or 0 } end
+            end
+        end
+        table.sort(rows, function(a, b) return a[2] > b[2] end)
+        local total = GetAddOnCPUUsage("WoWBY")
+        local out = { ("total %.0f ms over %.0f s of play"):format(total, GetTime()) }
+        print("|cff33ff99WoWBY perf|r: " .. out[1])
+        for i = 1, math.min(15, #rows) do
+            local s = ("%2d. %-28s %8.1f ms %7d calls"):format(i, rows[i][1], rows[i][2], rows[i][3])
+            print("  " .. s); out[#out + 1] = s
+        end
+        WoWBY_DB.perf = out
+        return
+    end
     if msg == "np blizz" or msg == "np label" then       -- compare: Blizzard's own name vs our label
         WoWBY_DB.np_mode = msg == "np blizz" and "blizz" or nil
         W.style_all_plates()
