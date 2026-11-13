@@ -728,6 +728,11 @@ end
 if _G.QuestFrameGreetingPanel then
     QuestFrameGreetingPanel:HookScript("OnShow", function() pcall(tr_greeting) end)
 end
+-- R981 (owner 2026-11-13, Rezlak: titles English): on QUEST_LOG_UPDATE Blizzard calls QuestFrameGreetingPanel_OnShow
+-- DIRECTLY (not through the OnShow script) and rebuilds the list in English → hook the global too
+if _G.QuestFrameGreetingPanel_OnShow then
+    hooksecurefunc("QuestFrameGreetingPanel_OnShow", function() pcall(tr_greeting) end)
+end
 -- R950 (owner screenshot: after accepting one quest the list went English): QUEST_LOG_UPDATE redraws the open greeting by
 -- calling QuestFrameGreetingPanel_OnShow directly, not through OnShow → post-hook the function too
 if _G.QuestFrameGreetingPanel_OnShow then

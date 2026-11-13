@@ -27107,6 +27107,7 @@ WoWBY_Gossip["Hail. Be brief, for we both have much to do."]="Вітаю. Каж
 WoWBY_Gossip["Mind yourself in the presence of the Warchief, $c. The Kor'kron will suffer no insolence or insult here."]="Сачы за сабой у прысутнасці правадыра, $c. Кар'крон не пацярпіць тут ні нахабства, ні знявагі."
 WoWBY_Gossip["Greetings, young $C."]="Вітаю, $Gмалады:маладая; $C."
 WoWBY_Gossip["I am Vol'jin, of the Darkspear. Do you be friend, or enemy?"]="Я — Вол'джын з Цёмнай Дзіды. Ты сябар ці вораг, мон?"
+WoWBY_Gossip["I'm happy Gazlowe gave me the opportunity to be here and all, but this place is more dangerous than I thought it'd be. It's also really hot. And dusty. And it smells kinda weird. Ah, well! Hopefully it will be good for business."]="Я рады, што Газлаў даў мне магчымасць быць тут і ўсё такое, але тут небяспечней, чым я думаў. А яшчэ вельмі горача. І пыльна. І пахне неяк дзіўна. Ну, нічога! Спадзяюся, для бізнесу гэта будзе добра."
 WoWBY_QVar = WoWBY_QVar or {}
 WoWBY_QVar["6361"]=WoWBY_QVar["6361"] or {}; WoWBY_QVar["6361"]["c#190872588"]="Калі табе трэба даставіць гэтыя шкуры ў Грамавы Уцёс, то ты $Gзвярнуўся:звярнулася; акурат да патрэбнага орка!"
 WoWBY_QVar["76160"]=WoWBY_QVar["76160"] or {}; WoWBY_QVar["76160"]["d#2016822097"]="Магчыма, тваё прызванне — атруты, а не маскіроўка. Гарпіі на поўначы гняздуюцца на дрэве, якое вылучае надзвычай таксічную смалу. Збяры апалыя шышкі вакол гнёздаў, а потым разатры іх у мазь. Нанесеная на лязо, гэтая мазь выпаліць раны праціўніка ў самую плоць і ператворыць яго кроў у соль."

@@ -127,19 +127,11 @@ end
 -- R160 (owner 2026-11-05): a newly accepted quest stayed out of the objective tracker until the language toggle.
 -- R889 (owner 2026-11-11): the R160 workaround (ObjectiveTrackerManager:UpdateAll from our timer) WAS the taint — the
 -- tracker update ran tainted, ShouldShowMawBuffs → GetAuraDataByIndex failed (blizz_errors), the update aborted before the
--- quest module, and finished quests stayed «8/8». Now only a C API call: watch the quest if it is not watched; the engine
--- then fires QUEST_WATCH_LIST_CHANGED and Blizzard updates the tracker from its own (secure) event handler.
-do
-    local f = CreateFrame("Frame")
-    f:RegisterEvent("QUEST_ACCEPTED")
-    f:SetScript("OnEvent", function(_, _, qid)
-        C_Timer.After(0.3, function()
-            if InCombatLockdown() or type(qid) ~= "number" or not C_QuestLog.AddQuestWatch then return end
-            local watched = C_QuestLog.GetQuestWatchType and C_QuestLog.GetQuestWatchType(qid)
-            if watched == nil then pcall(C_QuestLog.AddQuestWatch, qid) end
-        end)
-    end)
-end
+-- quest module, and finished quests stayed «8/8».
+-- R980 (owner 2026-11-13, blizz_errors 20:23: the same ShouldShowMawBuffs taint, objectives stuck at «6/6» without the
+-- tick): the R889 AddQuestWatch call from our timer fires QUEST_WATCH_LIST_CHANGED synchronously, so Blizzard's handler
+-- marked the tracker dirty from OUR (tainted) call stack and the next-frame update ran tainted. Removed: WoWBY calls
+-- nothing quest-watch / tracker related; the engine's own auto-watch adds new quests.
 -- calendar holiday view (R197): Blizzard joins the description and "Begins / Ends" (CALENDAR_HOLIDAYFRAME_BEGINSENDS)
 -- into one ScrollingFont text, so the whole string never matched; re-built here from the holiday info
 local cal_hooked = false
