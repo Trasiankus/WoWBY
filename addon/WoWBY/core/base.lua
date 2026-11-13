@@ -474,6 +474,9 @@ function W.harvest(kind, key, val)
     end
     -- R837: player names have spaces on Forever ("Hartwig Hirschhorn"): never the player or a group member
     if (kind == "names" or kind == "objects") and W.is_group_name(key) then return end
+    -- R982 (harvest 2026-11-13): XP / reputation bar texts ("4,123 / 6,500  ( 64% )"), a lone " " and quest objective
+    -- sentences from minimap blips came in as objects — an object name has letters and is not a sentence
+    if kind == "objects" and (not key:find("%a%a") or key:find("%.$")) then return end
     hv()[kind][key] = val or true
 end
 -- at login (R223, owner 2026-10-07): drop harvested entries the shipped data now translates, so the counter in the
