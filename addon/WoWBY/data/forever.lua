@@ -27131,6 +27131,7 @@ WoWBY_Objectives["Deathguards motivated"]="Заахвочана: вартавы�
 WoWBY_Objectives["Kyle Fed"]="Накормлена: Кайл"
 WoWBY_Objectives["Test the Dried Seeds"]="Выпрабуйце сушанае насенне"
 WoWBY_Objectives["Test the Eggscilliscope Prototype"]="Выпрабуйце прататып яйцацылографа"
+WoWBY_Objectives["Gauge Neeru Fireblade's reaction"]="Ацаніце рэакцыю Нееру Вогненнага Клінка"
 N["Kal"]="Кэл"
 N["Kall"]="Кэл"
 N["Elder Bladeleaf"]="Старэйшына Ліст Клінка"

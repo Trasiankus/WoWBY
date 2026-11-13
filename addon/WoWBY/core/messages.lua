@@ -1379,6 +1379,11 @@ local function tr_row(button)
         W.friend_row_fs = fs                                        -- retext_fs shortens «Узровень» here (R927)
         pcall(W.retext_fs, fs)
         W.friend_row_fs = nil
+        -- R986 (owner screenshot «Узр....» on first opens): the row string's own SetText hook (panel pre-scan) had
+        -- already put the FULL «Узровень 60» in, so retext_fs above saw Belarusian and did not shorten it → shorten here
+        local t = plain(fs:GetText())
+        local s = t and t:gsub("^Узровень (%d)", "Узр. %1")
+        if s and s ~= t then W.swap(fs, s) end
     end)
     -- recent allies (R939, owner screenshot "Уз…"): SetCharacterLevel sized the Level string to the ENGLISH text; refit
     local lv = button.CharacterData and button.CharacterData.Level
@@ -1408,8 +1413,22 @@ local function tr_ally_tooltip()
     end
     tt:Show()
 end
-local friends_hooked, allies_hooked = false, false
+local friends_hooked, allies_hooked, cards_hooked = false, false, false
+-- R986b (owner screenshot «Узр....», Forever's social «Сябры» window): FriendsListSocialCardMixin sets the texts, then
+-- LayoutScaledContent sizes Level to its CURRENT width — a new card had no SetText hook yet, so the English "Level 60"
+-- was measured and our later «Узр. 60» was cut. Swap right after the texts are set, before the layout measures them.
+-- Cards are made on the first open (after WoWBY loads) and copy the hooked mixin methods.
+local function hook_cards()
+    local M = _G.FriendsListSocialCardMixin
+    if cards_hooked or not (M and M.RefreshFriendCharacterDataDisplayText) then return end
+    cards_hooked = true
+    hooksecurefunc(M, "RefreshFriendCharacterDataDisplayText", function(c) pcall(tr_row, c) end)
+    if M.RefreshLocationDisplayText then
+        hooksecurefunc(M, "RefreshLocationDisplayText", function(c) pcall(tr_row, c) end)
+    end
+end
 function W.hook_friend_rows()
+    hook_cards()
     if not friends_hooked and _G.FriendsFrame_UpdateFriendButton then
         friends_hooked = true
         hooksecurefunc("FriendsFrame_UpdateFriendButton", tr_row)

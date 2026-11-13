@@ -248,6 +248,9 @@ function W.show_harvest_export()
         sf:SetScrollChild(eb); exp.eb = eb
         local clr = CreateFrame("Button", nil, exp, "UIPanelButtonTemplate")
         clr:SetSize(220, 22); clr:SetPoint("BOTTOMLEFT", 12, 12); clr:SetText("Адправіў(-ла) — ачысціць")
+        -- R985 (owner 2026-11-13: cleared his own list by accident): the owner's local build (it ships WoWBY_HarvestSeen,
+        -- which the release zip leaves out) has no clear button — his harvest is read straight from SavedVariables
+        if WoWBY_HarvestSeen then clr:Hide() end
         clr:SetScript("OnClick", function()
             if WoWBY_DB.harvest then WoWBY_DB.harvest[GetLocale()] = nil end
             exp:Hide()
