@@ -1,6 +1,8 @@
 AuraContainerUtil
 BUYBACK_ITEMS_PER_PAGE
 BankPanel
+CLOSE
+C_AddOns
 C_CVar
 C_Calendar
 C_ChatBubbles
@@ -28,6 +30,7 @@ Enum
 EnumerateFrames
 EventRegistry
 FriendsFrame
+GameFontNormalSmall
 GameMenuFrame
 GameTimeFrame
 GameTime_GetFormattedTime
@@ -132,6 +135,7 @@ TRADE_ENCHANT_SLOT
 TooltipComparisonManager
 TooltipDataProcessor
 UIParent
+UISpecialFrames
 UnitCanAttack
 UnitCastingInfo
 UnitChannelInfo
@@ -139,7 +143,10 @@ UnitClass
 UnitCreatureType
 UnitExists
 UnitGUID
+UnitIsBattlePet
+UnitIsBattlePetCompanion
 UnitIsFriend
+UnitIsOtherPlayersPet
 UnitIsPlayer
 UnitIsUnit
 UnitLevel
@@ -217,6 +224,7 @@ setmetatable
 string
 strsplit
 table
+tinsert
 tonumber
 tostring
 type

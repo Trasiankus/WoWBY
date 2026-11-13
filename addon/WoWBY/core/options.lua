@@ -34,7 +34,7 @@ end
 local category
 local function build_options(gname)
     local f = CreateFrame("Frame", gname)
-    f:SetSize(400, 548); f:Hide()                  -- +28: the with-bars sub-option (R743); +12: counter on 2 lines (R781); +28: buff timers (R829)
+    f:SetSize(400, 592); f:Hide()                  -- +28: the with-bars sub-option (R743); +12: counter on 2 lines (R781); +28: buff timers (R829)
     local title = label(f, "|cff8080ffWoWBY|r — беларускі пераклад", 15); title:SetPoint("TOPLEFT", 24, -16)
     f.page_title = title                           -- the standalone window has it in its header instead
 
@@ -126,6 +126,12 @@ local function build_options(gname)
     local hvc = label(f, "", 11); hvc:SetPoint("TOPLEFT", 52, y + 6); hvc:SetTextColor(0.7, 0.7, 0.7)
     hvc:SetWidth(330)                               -- the counter ran past the window's right edge (R781)
     y = y - 22
+    -- R965 (owner 2026-11-13): one button that hands the collected text to the translator — a copy box (addons cannot
+    -- reach the internet or the clipboard); the player pastes it where the box says
+    local exb = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    exb:SetSize(200, 22); exb:SetPoint("TOPLEFT", 52, y + 2); exb:SetText("Адправіць сабранае")
+    exb:SetScript("OnClick", function() W.show_harvest_export() end)
+    y = y - 28
 
     local nl = label(f, "Імя вашага героя па-беларуску для тэкстаў заданняў:"); nl:SetPoint("TOPLEFT", 24, y - 10)
     nl:SetWidth(330)
@@ -166,6 +172,8 @@ local function build_options(gname)
         -- what is still untranslated (pruned at login once a build translates it, R223 / R677)
         hvc:SetText(("Сабрана: заданняў %d, імёнаў %d, аб'ектаў %d, зон %d, размоў %d, мэт %d, старонак %d"):format(
             n.quests, n.names, n.objects, n.zones, n.gossip, n.objectives, n.books))
+        local total = 0; for _, c in pairs(n) do total = total + c end
+        if exb.SetEnabled then exb:SetEnabled(total > 0) end
         eb:SetText(W.my_name_be() or "")
         hint:SetText("Калі пустое, выкарыстоўваецца арыгінальнае імя")     -- owner 2026-10-20 (R678)
     end
@@ -184,6 +192,77 @@ end
 -- Mode ran tainted (CompactUnitFrame_UpdateHealthColor "compare secret oldR … tainted by WoWBY", R29 / R406 family).
 -- Now they open our OWN window (a second copy of the page); the Settings category stays for Blizzard's own path.
 -- No Esc key capture (SetPropagateKeyboardInput is blocked in combat): close button / the same toggle.
+-- ---------- R965: harvest export (owner 2026-11-13) ----------
+-- One line of plain Lua: "WoWBY1 {v=1,loc=…,ver=…,at=…,h={…}}" — tools/import_paste.py reads it back with lupa. "|" is
+-- written as \124 (an EditBox would draw |c… colour codes), newlines as \n, so the line survives copy and paste.
+local function ser(v)
+    local t = type(v)
+    if t == "string" then
+        return '"' .. v:gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\r", ""):gsub("\n", "\\n"):gsub("|", "\\124") .. '"'
+    elseif t == "number" or t == "boolean" then
+        return tostring(v)
+    elseif t == "table" then
+        local out = {}
+        for k, x in pairs(v) do
+            local sk, sx = ser(k), ser(x)
+            if sk and sx then out[#out + 1] = "[" .. sk .. "]=" .. sx end
+        end
+        return "{" .. table.concat(out, ",") .. "}"
+    end
+    return nil                                           -- functions / userdata / secret values: dropped
+end
+function W.harvest_export_text()
+    local loc = GetLocale()
+    local h = WoWBY_DB.harvest and WoWBY_DB.harvest[loc]
+    if not h or not next(h) then return nil end
+    local ver = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata("WoWBY", "Version") or "?"
+    return "WoWBY1 {v=1,loc=" .. ser(loc) .. ",ver=" .. ser(tostring(ver)) .. ",at=" .. ser(date("%Y-%m-%d %H:%M"))
+        .. ",h=" .. ser(h) .. "}"
+end
+local exp
+function W.show_harvest_export()
+    local text = W.harvest_export_text()
+    if not text then return end
+    if not exp then
+        exp = CreateFrame("Frame", "WoWBYExportFrame", UIParent, "BasicFrameTemplateWithInset")
+        -- one layer above the options window (both were DIALOG: the export opened under it, R972)
+        exp:SetSize(520, 340); exp:SetPoint("CENTER"); exp:SetFrameStrata("FULLSCREEN_DIALOG"); exp:SetToplevel(true)
+        exp:SetMovable(true); exp:EnableMouse(true); exp:RegisterForDrag("LeftButton")
+        exp:SetScript("OnDragStart", exp.StartMoving); exp:SetScript("OnDragStop", exp.StopMovingOrSizing)
+        tinsert(UISpecialFrames, "WoWBYExportFrame")       -- Esc closes it
+        if exp.TitleText then exp.TitleText:SetFont(W.FONT, 12, ""); exp.TitleText:SetText("WoWBY: сабраны тэкст") end
+        local info = label(exp, "1. Націсніце Ctrl+C — тэкст ужо вылучаны.\n"
+            .. "2. Устаўце яго ў новае паведамленне: github.com/Trasiankus/WoWBY/issues "
+            .. "(або дашліце Трасянкусу іншым спосабам).\n"
+            .. "Тут толькі неперакладзены тэкст гульні, без вашага імя.", 12)
+        info:SetPoint("TOPLEFT", 14, -32); info:SetWidth(490)
+        local sf = CreateFrame("ScrollFrame", nil, exp, "UIPanelScrollFrameTemplate")
+        sf:SetPoint("TOPLEFT", 12, -100); sf:SetPoint("BOTTOMRIGHT", -32, 44)
+        local eb = CreateFrame("EditBox", nil, sf)
+        eb:SetMultiLine(true); eb:SetMaxLetters(0); eb:SetAutoFocus(false); eb:SetWidth(460)
+        eb:SetFont(W.FONT, 11, "")
+        eb:SetScript("OnEscapePressed", function() exp:Hide() end)
+        eb:SetScript("OnTextChanged", function(self, user)       -- read-only: typing puts the export back
+            if user then self:SetText(exp.text or ""); self:HighlightText() end
+        end)
+        sf:SetScrollChild(eb); exp.eb = eb
+        local clr = CreateFrame("Button", nil, exp, "UIPanelButtonTemplate")
+        clr:SetSize(220, 22); clr:SetPoint("BOTTOMLEFT", 12, 12); clr:SetText("Адправіў(-ла) — ачысціць")
+        clr:SetScript("OnClick", function()
+            if WoWBY_DB.harvest then WoWBY_DB.harvest[GetLocale()] = nil end
+            exp:Hide()
+            if opts and opts:IsShown() and opts.sync then opts.sync() end
+        end)
+        local cls = CreateFrame("Button", nil, exp, "UIPanelButtonTemplate")
+        cls:SetSize(100, 22); cls:SetPoint("BOTTOMRIGHT", -12, 12); cls:SetText(CLOSE or "Close")
+        cls:SetScript("OnClick", function() exp:Hide() end)
+        if W.ui_be and CLOSE then cls:SetText(W.ui_be(CLOSE) or CLOSE) end
+    end
+    exp.text = text
+    exp:Show(); exp:Raise()
+    exp.eb:SetText(text); exp.eb:SetFocus(); exp.eb:HighlightText()
+end
+
 local win
 local function standalone()
     if win then return win end
@@ -191,7 +270,9 @@ local function standalone()
     local ok, w = pcall(CreateFrame, "Frame", "WoWBYOptionsWindow", UIParent, "PortraitFrameTemplate")
     if not ok then ok, w = pcall(CreateFrame, "Frame", "WoWBYOptionsWindow", UIParent, "BasicFrameTemplateWithInset") end
     win = ok and w or CreateFrame("Frame", "WoWBYOptionsWindow", UIParent)
-    win:SetSize(410, 568); win:SetPoint("CENTER")         -- +28 for the buff-timer row (R829); win:SetFrameStrata("DIALOG"); win:SetClampedToScreen(true)
+    -- +28 for the buff-timer row (R829), +44 for the harvest export button (R965)
+    win:SetSize(410, 612); win:SetPoint("CENTER")
+    win:SetFrameStrata("DIALOG"); win:SetClampedToScreen(true)   -- had been swallowed by the comment above (R965)
     win:SetMovable(true); win:EnableMouse(true); win:RegisterForDrag("LeftButton")
     win:SetScript("OnDragStart", win.StartMoving); win:SetScript("OnDragStop", win.StopMovingOrSizing)
     local HEADER = "WoWBY — беларускі пераклад"
@@ -284,11 +365,53 @@ local function dump_tooltip()
         dump.lines[i] = { drawn = lt, right = rt or nil, ltype = ld and ld.type, data = dt,
                           copy = cl and plain(cl.leftText) or nil, use_rule = ok and use or ("ERR " .. tostring(use)) }
     end
+    -- R971 (minimap quest blips went secret): every field of the tooltip data and of its lines, secret or not —
+    -- is there a quest id / anything readable to rebuild the text from?
+    local function fields(tbl, prefix, depth)
+        if type(tbl) ~= "table" or depth > 2 then return end
+        for k, v in pairs(tbl) do
+            local ks = sec(k) and "<secret key>" or tostring(k)
+            local vs
+            if sec(v) then vs = "SECRET(" .. type(v) .. ")"
+            elseif type(v) == "table" then vs = "{…}"
+            else vs = tostring(v):gsub("|", "||"):sub(1, 60) end
+            dump.fields = dump.fields or {}
+            dump.fields[#dump.fields + 1] = prefix .. ks .. " = " .. vs
+            if type(v) == "table" and not sec(v) then fields(v, prefix .. ks .. ".", depth + 1) end
+        end
+    end
+    if data then pcall(fields, data, "", 0) end
+    for _, s in ipairs(dump.fields or {}) do DEFAULT_CHAT_FRAME:AddMessage("  · " .. s) end
     if WoWBY_DB then WoWBY_DB.tt_dump = dump end
     aura_report()
 end
+-- R969 (owner 2026-11-13: screenshots for the QA chat): /wowby demo plants a few sample entries in the harvest so the
+-- counter and the export window show something; /wowby demo off takes exactly those out again.
+local DEMO = {
+    names = { ["Thistlefur Shaman"] = true, ["Grimtotem Raider"] = true },
+    objects = { ["Ancient Cache"] = true },
+    zones = { ["Windshear Hold"] = true },
+    gossip = { ["The winds whisper of trouble to the north, $c. Tread carefully."] = 3441 },
+    objectives = { ["0/6 Thistlefur Shaman slain"] = 1061 },
+    quests = { ["99901"] = { c = "You did well, $N. The spirits are pleased." } },
+}
+local function demo_harvest(on)
+    WoWBY_DB.harvest = WoWBY_DB.harvest or {}
+    local loc = GetLocale()
+    local h = WoWBY_DB.harvest[loc] or {}
+    WoWBY_DB.harvest[loc] = h
+    for kind, items in pairs(DEMO) do
+        h[kind] = h[kind] or {}
+        for k, v in pairs(items) do h[kind][k] = on and v or nil end
+    end
+    print(on and "|cff33ff99WoWBY|r: дададзены прыклады ў «Сабрана» (/wowby demo off — прыбраць)"
+        or "|cff33ff99WoWBY|r: прыклады прыбраныя")
+    if opts and opts:IsShown() and opts.sync then opts.sync() end
+end
+
 SlashCmdList["WOWBY"] = function(msg)
     msg = W.strtrim((msg or ""):lower())
+    if msg == "demo" or msg == "demo off" then demo_harvest(msg == "demo"); return end
     if msg == "np blizz" or msg == "np label" then       -- compare: Blizzard's own name vs our label
         WoWBY_DB.np_mode = msg == "np blizz" and "blizz" or nil
         W.style_all_plates()

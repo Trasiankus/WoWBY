@@ -21,12 +21,30 @@ local function token_key(k)
     return k
 end
 
+-- R959 (owner 2026-11-13): Forever serves some 1.12 pages wrapped in HTML (<HTML><BODY><H1>…</H1><P>…</P>) or with other
+-- blank lines; the bare words of the page (tags dropped, whitespace collapsed) find the 1.12 translation. The BE page
+-- then comes as plain text (the page frame shows plain text fine; only the HTML heading style is lost).
+local loose
+local function loose_key(t)
+    return (t:gsub("<[^>]*>", " "):gsub("%s+", " "):match("^ ?(.-) ?$"))
+end
+local function loose_be(k)
+    if not loose then
+        loose = {}
+        for en, be in pairs(W.B) do
+            local lk = loose_key(en)
+            if loose[lk] == nil then loose[lk] = be end
+        end
+    end
+    return loose[loose_key(k)]
+end
+
 -- EN page -> BE page, or nil
 function W.book_be(t)
     t = plain(t)
     if not t or t == "" then return nil end
     local k = page_key(t)
-    return W.B[k] or W.B[token_key(k)]
+    return W.B[k] or W.B[token_key(k)] or loose_be(k) or loose_be(token_key(k))
 end
 
 local function title_be(t)

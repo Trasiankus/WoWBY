@@ -22,7 +22,7 @@ MAX_CHARS = 45000
 MAX_ITEMS = 600
 # (EN limit 7000 until 2026-09-30: each sub-agent reads ~62 KB of rules per chunk, so bigger chunks save budget; long
 # help texts are split so no chunk is >~3x the median)
-ORDER = ["itemsets", "enchants", "suffixes", "quests", "objectives", "zones", "names", "titles", "chartitles", "factions", "focus", "ui_prof", "ui", "gossip", "items", "spellnames", "auras", "spelldesc", "flavor", "item_text", "db2_misc", "barber", "emotes", "achievements", "books", "quests_gender", "quests_namefix", "quests_address", "quests_unify", "quests_itemfix", "quests_speaker", "ui_termfix", "items_redo", "items_hidden", "spellnames_redo", "quests_update", "quests_classic_update", "spellnames_redo2", "spelldesc_redo", "stylefix", "quests_capfix", "names_qa", "zones_qa", "quests_natural", "gossip_natural", "ui_later", "ui_unused"]
+ORDER = ["itemsets", "enchants", "suffixes", "quests", "objectives", "zones", "names", "titles", "chartitles", "factions", "focus", "ui_prof", "ui", "gossip", "items", "spellnames", "auras", "spelldesc", "flavor", "item_text", "db2_misc", "barber", "emotes", "achievements", "books", "quests_gender", "quests_namefix", "quests_address", "quests_unify", "quests_itemfix", "quests_speaker", "ui_termfix", "items_redo", "items_hidden", "spellnames_redo", "quests_update", "quests_classic_update", "quests_classic_update2", "spellnames_redo2", "spelldesc_redo", "stylefix", "quests_capfix", "names_qa", "zones_qa", "quests_natural", "gossip_natural", "ui_later", "ui_unused"]
 UI_PKGS = ("ui", "ui_later", "ui_unused", "emotes", "ui_prof")        # one id space (md5 of EN): a string done in any of them is done
 # UI strings never displayed (typed chat commands, debug) -> skipped; retail-only features Forever probably never
 # shows (housing, shop, garrisons, covenants, …) + PTR/voice/audio-alert lines -> "ui_later" at the end.
@@ -251,6 +251,7 @@ def collect():
     pk["spellnames_redo"] = spellnames_redo()
     pk["quests_update"] = quests_update(pk["quests"])
     pk["quests_classic_update"] = quests_classic_update()
+    pk["quests_classic_update2"] = quests_classic_update2()
     for name, fn in (("spellnames_redo2", spellnames_redo2), ("spelldesc_redo", spelldesc_redo), ("itemsets", itemsets), ("enchants", enchants), ("suffixes", suffixes), ("quests_capfix", quests_capfix),
                      ("names_qa", names_qa), ("zones_qa", zones_qa), ("quests_natural", quests_natural), ("gossip_natural", gossip_natural), ("flavor", flavor), ("achievements", achievements), ("chartitles", chartitles), ("factions", factions), ("focus", focus),
                      ("tips", tips), ("books", books), ("item_text", item_text), ("db2_misc", db2_misc), ("barber", barber)):
@@ -846,6 +847,11 @@ def quests_update(pk_quests):
         n = lambda s: re.sub(r"\$\d*oa\b|\b\d+\b", "#", re.sub(r"\s+", " ", re.sub(r"(\$[Bb])+", " ", strip_page_labels(s))).strip())
         return n(a) == n(b)
 
+    def same_words(a, b):
+        # R955: spacing / punctuation / "ley lines" vs "leylines" only — letters and digits compared, tokens folded
+        n = lambda s: re.sub(r"[^a-z0-9#]", "", re.sub(r"\$\d*oa\b|\b\d+\b", "#", re.sub(r"\$[A-Za-z]", " ", strip_page_labels(s))).lower())
+        return n(a) == n(b)
+
     sbe = json.load(open(os.path.join(ROOT, "data", "strings_be.json"), encoding="utf-8"))
     was = {}                                                  # EN each done quest had when it was queued
     for f in glob.glob(os.path.join(OUT, "queue", "quests", "*.json")):
@@ -853,16 +859,27 @@ def quests_update(pk_quests):
             continue
         for it in json.load(open(f, encoding="utf-8"))["items"]:
             was[it["id"]] = it.get("en") or {}
+    upd = {}                                                  # R955: fields a FINISHED update item already carried
+    for f in glob.glob(os.path.join(OUT, "queue", "quests_update", "*.json")):
+        if not os.path.exists(f.replace(os.sep + "queue" + os.sep, os.sep + "done" + os.sep)):
+            continue
+        for it in json.load(open(f, encoding="utf-8"))["items"]:
+            upd.setdefault(it["id"].split("#")[0], {}).update(it.get("en") or {})
     out = []
     for q in pk_quests:
         be = sbe.get("quest:" + q["id"])
         if not be or q["id"] not in was:
             continue
         old = was[q["id"]]
-        todo = {f: v for f, v in q["en"].items() if not be.get(f) or (f in old and not same(old[f], v))}
+        done_upd = upd.get(q["id"], {})
+        todo = {f: v for f, v in q["en"].items()
+                if not be.get(f) or (f in old and not same(old[f], v) and not same_words(old[f], v))}
+        todo = {f: v for f, v in todo.items() if not (be.get(f) and f in done_upd and same(done_upd[f], v))}
         if not todo:
             continue
-        item = {"id": q["id"], "en": todo, "ru": {f: r for f, r in q.get("ru", {}).items() if f in todo},
+        # R955: id = quest + the fields it carries ("99196#p"): a field found AFTER the quest's first update item was
+        # done (progress text harvested later) had the same id as that finished item and was never queued again
+        item = {"id": q["id"] + ("#" + "".join(sorted(todo)) if q["id"] in upd else ""), "en": todo, "ru": {f: r for f, r in q.get("ru", {}).items() if f in todo},
                 "be_context": {f: v for f, v in be.items() if f not in todo}}
         cur = {f: be[f] for f in todo if be.get(f)}
         if cur: item["be_current"] = cur
@@ -870,18 +887,38 @@ def quests_update(pk_quests):
     return out
 
 
-def quests_classic_update():
+def quests_classic_update2():
+    """R967 (owner 2026-11-13, "let's update vanilla"): the 2026-11-13 rescrape (review/vanilla_en_rescrape.txt, ~700
+    quests QuestV2 lacks) found ~190 more vanilla fields whose live English differs from the turtle-bel English (turtle /
+    tbc / classic copies) and that R721 did not cover → review/classic_update_left.txt ("qid.f", from
+    review/classic_update_left.py). Same items / import as quests_classic_update, ids "tb2:<qid>"."""
+    p = os.path.join(ROOT, "review", "classic_update_left_r967.txt")   # frozen: the list this package was queued from
+    if not os.path.exists(p): return []
+    pairs = {}
+    for line in open(p, encoding="utf-8"):
+        if "." in line.strip():
+            q, f = line.strip().split(".", 1); pairs.setdefault(q, set()).add(f)
+    q_en = {}
+    for b in ("turtle", "tbc", "classic"):
+        bp = os.path.join(TB, "data", b, "quests_en.json")
+        if os.path.exists(bp): q_en.update(json.load(open(bp, encoding="utf-8")))
+    return quests_classic_update(pairs, q_en, "tb2:")
+
+
+def quests_classic_update(pairs=None, q_en=None, prefix="tb:"):
     """R721 (2026-10-22): the overnight scrape of every translated classic quest on wowhead's Forever pages
     (review/classic_quest_ids.txt) showed ~600 fields whose Forever English differs from the turtle-bel English we
     translated (Turtle's edited copy; Forever rewrote e.g. the Ashenvale Hunt completions) — the game cache agrees with
     Forever's text, never with ours. One item per quest with only those fields; `be_current` = our shipped Belarusian
-    (reuse its wording where the meaning stayed). Import writes them into data/be tb_quests ONCE (re-pass target)."""
+    (reuse its wording where the meaning stayed). Import writes them into data/be tb_quests ONCE (re-pass target).
+    pairs / q_en / prefix: R967's second round (quests_classic_update2)."""
     wp = os.path.join(ROOT, "forever-data", "en", "quests.json")
     ip = os.path.join(ROOT, "review", "classic_quest_ids.txt")
-    if not (os.path.exists(wp) and os.path.exists(ip)): return []
+    if not (os.path.exists(wp) and (pairs or os.path.exists(ip))): return []
     wh = json.load(open(wp, encoding="utf-8"))
-    ids = [l for l in open(ip, encoding="utf-8").read().split() if l.isdigit()]
-    q_en = json.load(open(os.path.join(TB, "data", "classic", "quests_en.json"), encoding="utf-8"))
+    ids = sorted(pairs, key=int) if pairs else [l for l in open(ip, encoding="utf-8").read().split() if l.isdigit()]
+    if q_en is None:
+        q_en = json.load(open(os.path.join(TB, "data", "classic", "quests_en.json"), encoding="utf-8"))
     corp = json.load(open(os.path.join(ROOT, "data", "be", "tb_quests.json"), encoding="utf-8"))
     names = {}                                            # R543: a player's name captured by wowhead -> $N
     pn = os.path.join(ROOT, "data", "player_names.tsv")
@@ -902,13 +939,14 @@ def quests_classic_update():
         for f in ("t", "o", "d", "p", "c"):
             new, old, key = r.get(f), (q_en.get(qid) or {}).get(f), "%s.%s" % (qid, f)
             if not new or not old or key not in corp: continue
+            if pairs and f not in pairs.get(qid, ()): continue
             if (qid, f) in names:
                 new = re.sub(r"(?<![\w'’])%s(?![\w'’])" % re.escape(names[(qid, f)]), "$N", new)
             new = re.sub(r"<([^<>/]*)/([^<>/]*)>", r"$G\1:\2;", new)          # wowhead gender pairs back to $G
             if norm(new) == norm(old): continue
             todo[f], cur[f] = new, corp[key]["be"]
         if todo:
-            out.append({"id": "tb:" + qid, "en": todo, "be_current": cur,
+            out.append({"id": prefix + qid, "en": todo, "be_current": cur,
                         "target": {"domain": "tb_quests", "keys": {f: "%s.%s" % (qid, f) for f in todo}},
                         "fix": ["WoW Forever's English for these fields differs from the text be_current was translated "
                                 "from: translate the NEW English. Keep be_current's wording, names and tone where the "

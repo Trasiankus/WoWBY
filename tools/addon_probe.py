@@ -28,7 +28,7 @@ def load(female=False, ru=False):
                   'ENV.SELL_PRICE = "Цена продажи"')
     run = L.globals().RUN
     # data files open with `X = X or {}`: the stub would hand them a stub object instead of a table (R564)
-    L.execute("for _, k in ipairs({'WoWBY_Objectives', 'WoWBY_NamesF', 'WoWBY_TitlesF', 'WoWBY_QTitleFV', 'WoWBY_QuestOA'}) do ENV[k] = {} end")
+    L.execute("for _, k in ipairs({'WoWBY_Objectives', 'WoWBY_NamesF', 'WoWBY_TitlesF', 'WoWBY_QTitleFV', 'WoWBY_QuestOA', 'WoWBY_Books'}) do ENV[k] = {} end")
     core_list, data_list = core_files()
     for f in data_list:
         run(open(os.path.join(DATA, f), encoding="utf-8").read(), "data/" + f)

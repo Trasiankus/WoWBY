@@ -728,3 +728,8 @@ end
 if _G.QuestFrameGreetingPanel then
     QuestFrameGreetingPanel:HookScript("OnShow", function() pcall(tr_greeting) end)
 end
+-- R950 (owner screenshot: after accepting one quest the list went English): QUEST_LOG_UPDATE redraws the open greeting by
+-- calling QuestFrameGreetingPanel_OnShow directly, not through OnShow → post-hook the function too
+if _G.QuestFrameGreetingPanel_OnShow then
+    hooksecurefunc("QuestFrameGreetingPanel_OnShow", function() pcall(tr_greeting) end)
+end

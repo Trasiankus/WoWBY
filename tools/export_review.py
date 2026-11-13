@@ -69,6 +69,15 @@ def collect(parked=False):
     for b in ("turtle", "tbc", "classic"):
         p = os.path.join(TB, "data", b, "quests_en.json")
         if os.path.exists(p): q_en.update(json.load(open(p, encoding="utf-8")))
+    # R964 (owner 2026-11-13: "use the fresh source, stop using Turtle"): the live Forever English from wowhead
+    # (forever-data/en/quests.json) wins field by field; turtle-bel's EN had Turtle's own rewrites (6503.c)
+    fp = os.path.join(ROOT, "forever-data", "en", "quests.json")
+    if os.path.exists(fp):
+        for qid, v in json.load(open(fp, encoding="utf-8")).items():
+            if isinstance(v, dict) and v.get("status") == "ok" and not v.get("placeholder"):
+                d = q_en.setdefault(str(qid), {})
+                for f in ("t", "o", "d", "p", "c"):
+                    if v.get(f): d[f] = v[f]
     # R260: RU for text-keyed domains: every client DB2 string (EN -> RU, items / spells / zones / factions…) +
     # Questie's ruRU NPC names
     ALL = {}

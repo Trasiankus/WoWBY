@@ -390,6 +390,8 @@ function ui_be_core(t)
 end
 -- texts Blizzard joins with a blank line ("%s\n\n%s": the Spirit tooltip + SPIRIT_STANDING_WARNING, R535): when the
 -- whole text is unknown, each split at a "\n\n" is tried — the left part known, the right part known (it may split again)
+local KEY_WORDS = { Tab = "Tab", Space = "Прабел", Spacebar = "Прабел", Enter = "Enter", Escape = "Escape",
+    Backspace = "Backspace", Delete = "Delete", Insert = "Insert", Home = "Home", End = "End" }
 function W.ui_be(t, depth)
     -- R932: "Level 7 Undead (Player)" — the word is the player's RACE (Навец / Наўка), not the creature type «Наўе»
     local prl = W.player_race_line
@@ -399,6 +401,14 @@ function W.ui_be(t, depth)
     if be or type(t) ~= "string" then return be end
     depth = depth or 0
     local p = depth < 4 and plain(t)
+    -- R961 (owner 2026-11-13): a label with its key binding, "Interact With Target (Z)", "Show nameplates for enemy units
+    -- (V)", "World Map (M)": the label translates, the key stays as the keyboard has it (Space = «Прабел», R779)
+    local base, key
+    if p then base, key = p:match("^(.-) %(([^()]+)%)$") end
+    if base and (key:find("^[%u%d][%u%d%-]*$") or KEY_WORDS[key]) then
+        local b = ui_be_one(base)
+        if b then return b .. " (" .. (KEY_WORDS[key] or key) .. ")" end
+    end
     if not (p and p:find("\n\n", 1, true)) then return nil end
     local pos = 1
     while true do

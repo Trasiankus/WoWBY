@@ -37,7 +37,11 @@ function W.name_be_unit(en, unit)
         local g = W.sid_ok(UnitGUID(u))
         id = type(g) == "string" and tonumber(g:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)%-")) or nil
     end
-    local be = W.name_be(en, u and UnitPlayerControlled(u), id)    -- hunter pets, companions, minions: not harvested
+    -- hunter pets, companions, minions: not harvested; R968: battle pets / other players' companions carry names their
+    -- owners typed ("Sausage") — translated if known, never collected
+    local named = u and ((UnitIsOtherPlayersPet and UnitIsOtherPlayersPet(u))
+        or (UnitIsBattlePetCompanion and UnitIsBattlePetCompanion(u)) or (UnitIsBattlePet and UnitIsBattlePet(u)))
+    local be = W.name_be(en, (u and UnitPlayerControlled(u)) or named, id)
     if be and u and UnitSex(u) == 3 then
         be = (WoWBY_NamesF or {})[plain(en)] or be
     end
@@ -112,6 +116,63 @@ if TooltipDataProcessor and Enum and Enum.TooltipDataType and Enum.TooltipDataTy
         local be = l1 and W.name_be(plain(l1.leftText))       -- misses are harvested like NPC names
         if be then l1.leftText = be end
     end)
+end
+-- R952 (owner screenshot: target-of-target NPC "Pyall Silentst…" stayed English): TargetOfTargetMixin runs Update from
+-- OnUpdate, i.e. UnitFrame_Update re-sets the name EVERY frame, so our one-off SetText is gone next frame. No hooks on
+-- unit frames (taint) → OUR label (a UIParent child) laid over the ToT name, Blizzard's name faded with SetAlpha (a
+-- display call, as on the nameplates). Checked every 0.2 s; English mode / players / unknown names → Blizzard's own.
+do
+    local labels = {}
+    -- R952e (owner test: Latin text in our UIParent label was dim too, with every value equal to Blizzard's) → the label
+    -- is a text region of the name's own parent, same draw layer, right next to Blizzard's name: drawn the same way.
+    -- Only a region is added (no hook, no field on the frame; our table keeps it); made out of combat.
+    local function label_for(fr, name)
+        local l = labels[fr]
+        if not l then
+            if InCombatLockdown() then return nil end
+            local parent = name:GetParent() or fr
+            local layer, sub = name:GetDrawLayer()
+            local fs = parent:CreateFontString(nil, layer or "OVERLAY")
+            if sub then pcall(fs.SetDrawLayer, fs, layer or "OVERLAY", math.min((sub or 0) + 1, 7)) end
+            fs:SetWordWrap(false)
+            l = { fs = fs, f = { Show = function() fs:Show() end, Hide = function() fs:Hide() end, IsShown = function() return fs:IsShown() end } }
+            labels[fr] = l
+            if fr == _G.TargetFrameToT then _G.WoWBYToTLabel = { fs = fs } end   -- /run diagnostics
+        end
+        return l
+    end
+    local function tot_tick()
+        for _, fr in ipairs({ _G.TargetFrameToT, _G.FocusFrameToT }) do
+            local name, u = fr and fr.name, fr and fr.unit
+            if name then
+                local be
+                if W.on("names") and u and fr:IsVisible() and UnitExists(u) and not UnitIsPlayer(u) then
+                    be = W.name_be_unit(plain(UnitName(u)), u)
+                end
+                local l = labels[fr]
+                if be then l = label_for(fr, name) end
+                if be and l then
+                    l.fs:ClearAllPoints(); l.fs:SetAllPoints(name)
+                    l.fs:SetFontObject(name:GetFontObject() or GameFontNormalSmall)
+                    local ff, fsz, ffl = name:GetFont()
+                    if ff and type(fsz) == "number" and fsz > 0 then pcall(l.fs.SetFont, l.fs, W.by_font(ff) or ff, fsz, ffl or "") end
+                    l.fs:SetJustifyH(name:GetJustifyH() or "LEFT")
+                    -- R952b (owner: "still dark"): the read-back colour came out dim → the game's normal name yellow
+                    local c = _G.NORMAL_FONT_COLOR
+                    if c and c.r then l.fs:SetTextColor(c.r, c.g, c.b) else l.fs:SetTextColor(1, 0.82, 0) end
+                    local sr, sg, sb, sa = name:GetShadowColor()
+                    local sx, sy = name:GetShadowOffset()
+                    if type(sr) == "number" and not (issecretvalue and issecretvalue(sr)) then l.fs:SetShadowColor(sr, sg, sb, sa or 1) end
+                    if type(sx) == "number" and not (issecretvalue and issecretvalue(sx)) then l.fs:SetShadowOffset(sx, sy) end
+                    l.fs:SetText(be); l.f:Show()
+                    name:SetAlpha(0)
+                elseif l and l.f:IsShown() then
+                    l.f:Hide(); name:SetAlpha(1)
+                end
+            end
+        end
+    end
+    C_Timer.NewTicker(0.2, function() pcall(tot_tick) end)
 end
 function W.target_name()
     -- WowUkrainizer's way: plain SetText on the name FontString from OUR event handler, after Blizzard's own

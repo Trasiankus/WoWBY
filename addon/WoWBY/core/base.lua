@@ -310,6 +310,14 @@ end
 
 -- run W[name]() and keep going on error; the last errors are kept in WoWBY_DB.errors (read from SavedVariables:
 -- WoW hides Lua errors unless scriptErrors is on)
+-- R970: one line into WoWBY_DB.errors (newest first, 20 kept) — for runtime hooks that are not W.safe steps
+function W.log_error(msg)
+    if not WoWBY_DB then return end
+    WoWBY_DB.errors = WoWBY_DB.errors or {}
+    local e = WoWBY_DB.errors
+    table.insert(e, 1, date("%Y-%m-%d %H:%M ") .. tostring(msg))
+    for i = #e, 21, -1 do e[i] = nil end
+end
 function W.safe(name, ...)
     local fn = W[name]
     if type(fn) ~= "function" then return end
@@ -341,13 +349,39 @@ if seterrorhandler and geterrorhandler then
         if prev then return prev(msg, ...) end
     end)
 end
+-- R951 (owner: "Interface action failed because of an AddOn" — logged?): those come as events, not Lua errors →
+-- ADDON_ACTION_BLOCKED / FORBIDDEN are kept in WoWBY_DB.blizz_errors too (which addon, which protected function, time,
+-- whether in combat). Every addon's, so we see whether WoWBY or another addon caused it.
+do
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("ADDON_ACTION_BLOCKED"); f:RegisterEvent("ADDON_ACTION_FORBIDDEN")
+    f:SetScript("OnEvent", function(_, event, addon, func)
+        pcall(function()
+            if not WoWBY_DB then return end
+            WoWBY_DB.blizz_errors = WoWBY_DB.blizz_errors or {}
+            local e = WoWBY_DB.blizz_errors
+            table.insert(e, 1, date("%Y-%m-%d %H:%M ") .. event .. " addon=" .. tostring(addon) .. " func=" .. tostring(func)
+                .. (InCombatLockdown() and " (in combat)" or ""))
+            for i = #e, 31, -1 do e[i] = nil end
+        end)
+    end)
+end
 -- ---------- harvest: collect what the game shows that WoWBY can't translate yet ----------
 -- Stored per client locale in WoWBY_DB.harvest[locale] (enUS gives source text, ruRU gives references);
--- read out by tools/import_harvest.py. OFF by default since R677 (owner 2026-10-20: players don't need it); switch in
--- the options window. Kept on for an install that has collected before (the owner's): see W.harvest_default.
+-- read out by tools/import_harvest.py (own install) or tools/import_paste.py (players' «Адправіць сабранае» exports).
+-- ON by default since R968 (2026-11-13; it was off R677–R967), switch in the options window: see W.harvest_default.
 function W.hv_on() return WoWBY_DB and WoWBY_DB.harvest_on and true or false end
 function W.harvest_default()
-    if not WoWBY_DB or WoWBY_DB.harvest_on ~= nil then return end
+    if not WoWBY_DB then return end
+    -- R968 (owner 2026-11-13: "make this one by default"): collecting is ON for everyone now — the export button sends
+    -- it to the translator. Switched on once per install (also where R677 had set it off); a later «off» is kept.
+    if not WoWBY_DB.hv_default2 then
+        WoWBY_DB.hv_default2 = true
+        WoWBY_DB.harvest_on = true
+        WoWBY_DB.noharvest = nil
+        return
+    end
+    if WoWBY_DB.harvest_on ~= nil then return end
     local had = false
     for _, l in pairs(WoWBY_DB.harvest or {}) do
         if type(l) == "table" then for _, t in pairs(l) do if type(t) == "table" and next(t) then had = true end end end
@@ -432,7 +466,12 @@ function W.harvest(kind, key, val)
     -- precedes you, druid." → "…, $C."), else the line is queued per character and its translation fits one class only
     if kind == "gossip" and W.player_tokens then key = W.player_tokens(key) end
     -- R837 (owner 2026-11-08): one entry per objective, not one per count ("4/8 …", "5/8 …" → "0/8 …")
-    if kind == "objectives" then key = key:gsub("^%d+/(%d+) ", "0/%1 ") end
+    if kind == "objectives" then
+        key = key:gsub("^%d+/(%d+) ", "0/%1 ")
+        -- R958 / R968: "0/6 ", "0/8   slain" = the item / mob name not loaded yet, nothing to translate
+        local rest = key:gsub("^%d+/%d+", ""):gsub("[Ss]lain", "")
+        if not rest:find("%a") then return end
+    end
     -- R837: player names have spaces on Forever ("Hartwig Hirschhorn"): never the player or a group member
     if (kind == "names" or kind == "objects") and W.is_group_name(key) then return end
     hv()[kind][key] = val or true
@@ -455,10 +494,13 @@ function W.prune_harvest()
     end
     local done = {
         names = function(k) return W.N[k] end,
-        objects = function(k) return W.N[k] end,
+        objects = function(k) return W.N[k] or W.IE[k] end,             -- R968: lootable objects named like items
         zones = function(k) return W.Z[k] end,
         gossip = function(k) return W.gossip_be and W.gossip_be(k) end,
-        objectives = function(k) return W.obj_line_be and W.obj_line_be(k) end,
+        objectives = function(k)
+            local rest = k:gsub("^%d+/%d+", ""):gsub("[Ss]lain", "")
+            return (not rest:find("%a")) or (W.obj_line_be and W.obj_line_be(k))   -- R968: "0/8   slain" = name not loaded
+        end,
         books = function(k) return (WoWBY_Books or {})[k] end,
     }
     for kind, ok in pairs(done) do

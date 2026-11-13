@@ -205,7 +205,7 @@ function tooltip_line_core(t)
     if looter and not looter:find(":") then
         local known = W.ui_be(t)                                      -- "Loot: Group Loot" & co. are UI strings
         if known and known ~= t then return known end
-        return "Здабыча: " .. (W.name_be(looter) or looter)
+        return "Здабыча: " .. (W.name_be(looter, true) or looter)    -- R958: a player's name, never harvested
     end
     -- game-menu performance tooltip (R123): per-addon memory "(48.20 MB) WoWBY" and the protocol block ("TCP" and
     -- addon names are not "known" captures, so the generic formats reject them)
@@ -387,9 +387,12 @@ local function tr_tooltip(tt)
     -- world objects hovered in the game world ("Strange Fruited Plant", R328): the tooltip comes as plain text or Object
     -- data the pre-call missed → line 1 swapped when it is a whole known name (never on unit tooltips: players)
     local unit = tt.GetUnit and select(2, tt:GetUnit())
-    if t1 and not sp and not unit and (dtype == nil or dtype == 4) and W.on("names") and W.N[t1] then
-        W.set_font(l1); l1:SetText(W.N[t1]); changed = true
-    elseif t1 and dtype == 4 and not unit and not W.N[t1] and not W.ours(t1) then
+    -- R968: a lootable object named like an item ("Small Black Pouch") takes the item's Belarusian name
+    local objb = t1 and not sp and not unit and (dtype == nil or dtype == 4) and W.on("names")
+        and (W.N[t1] or (W.on("spells") and W.IE[t1]))
+    if objb then
+        W.set_font(l1); l1:SetText(objb); changed = true
+    elseif t1 and dtype == 4 and not unit and not W.N[t1] and not W.IE[t1] and not W.ours(t1) then
         W.harvest("objects", t1)                       -- R600: untranslated world object ("Leyline")
     end
     if sp then
@@ -674,21 +677,26 @@ local function tr_minimap_tooltip(tt)
     end
     return changed
 end
+W.tr_minimap_tooltip = tr_minimap_tooltip        -- for tools/addon_probe.py tests (R970)
 -- aura tooltips whose data is SECRET (target / party buff buttons, R47): the data is never touched (writing into it
 -- tainted Blizzard, 2026-09-28). Out of combat, one frame after it is shown, only the drawn FontStrings are swapped
 -- — name by EN (WoWBY_AuraByName), description by the name's desc keys, "Magic" / "22 minutes remaining" as usual.
 -- Secret texts stay (plain() gives nil).
 local function tr_secret_aura(tt)
     if InCombatLockdown() or not (tt and tt.GetName and tt:GetName()) or not (W.is_be() and W.on("spells")) then return end
-    local owner = tt.GetOwner and tt:GetOwner()
-    if not (owner and (owner.auraInstanceID or owner.buttonInfo or (owner.GetName and (owner:GetName() or ""):find("Aura")))) then
-        return
-    end
     local n, changed = tt:GetName(), false
     local l1 = _G[n .. "TextLeft1"]
     local en = l1 and plain(l1:GetText())
     local e = en and (WoWBY_AuraByName or {})[en]
-    if e and e[1] then l1:SetText(e[1]); changed = true end
+    -- R954 (owner: target buffs / debuffs stay English): the target frame's aura buttons may hide their owner from
+    -- addons → a secret tooltip whose line 1 is a known aura name counts as an aura card too
+    local owner = tt.GetOwner and tt:GetOwner()
+    if not (e or (owner and (owner.auraInstanceID or owner.buttonInfo or (owner.GetName and (owner:GetName() or ""):find("Aura"))))) then
+        return
+    end
+    -- and the name: many auras have no BE name in the aura table, only in the by-EN spell names («Бонусы лагера»)
+    local nm = e and (e[1] or (W.spell_name_be and W.spell_name_be(en)))
+    if nm and nm ~= en then W.set_font(l1); l1:SetText(nm); changed = true end
     for i = 2, tt:NumLines() do
         for _, side in ipairs({ "Left", "Right" }) do
             local fs = _G[n .. "Text" .. side .. i]
@@ -789,11 +797,24 @@ local function tt_post(tt)
     end
     if tt_busy or (tt and W.TIP.secret[tt]) then return end
     tt_busy = true
-    local q = tr_quest_tooltip(tt)
-    local mm = tr_minimap_tooltip(tt)
-    local cp = tr_corpse(tt)
-    if (tr_tooltip(tt) or q or mm or cp) and tt.Show then tt:Show() end
+    -- R970 (owner 2026-11-13: minimap quest blips English again): one failing step left tt_busy = true for good and
+    -- every later tooltip was skipped → each step runs protected, its error is logged once (WoWBY_DB.errors)
+    local function step(fn, name)
+        local ok, r = pcall(fn, tt)
+        if not ok then
+            W.tt_err = W.tt_err or {}
+            if not W.tt_err[name] and W.log_error then W.log_error("tooltip " .. name .. ": " .. tostring(r)) end
+            W.tt_err[name] = true
+            return false
+        end
+        return r
+    end
+    local q = step(tr_quest_tooltip, "quest")
+    local mm = step(tr_minimap_tooltip, "minimap")
+    local cp = step(tr_corpse, "corpse")
+    local tr = step(tr_tooltip, "main")
     tt_busy = false
+    if (tr or q or mm or cp) and tt.Show then tt:Show() end
 end
 if GameTooltip then
     if TooltipDataProcessor and TooltipDataProcessor.AllTypes then
@@ -1049,8 +1070,10 @@ function W.hook_tooltips()
                     -- R621: a buff whose tooltip data stayed SECRET after combat is re-filled in English every second
                     -- ("10 minutes remaining") — tr_secret_aura ran only once at OnShow → re-run it (drawn text only,
                     -- out of combat, same rules) whenever the drawn text changed since our last swap
-                    if W.TIP.secret[self] and not InCombatLockdown() and o
-                       and (o.auraInstanceID or o.buttonInfo or (o.GetName and (o:GetName() or ""):find("Aura"))) then
+                    -- R954: target-frame buff buttons hide that they are auras → also when line 1 is a known aura name
+                    local a1 = W.TIP.secret[self] and plain(_G.GameTooltipTextLeft1 and _G.GameTooltipTextLeft1:GetText())
+                    if W.TIP.secret[self] and not InCombatLockdown() and (a1 and (WoWBY_AuraByName or {})[a1]
+                       or o and (o.auraInstanceID or o.buttonInfo or (o.GetName and (o:GetName() or ""):find("Aura")))) then
                         local l1, ln = _G.GameTooltipTextLeft1, _G["GameTooltipTextLeft" .. self:NumLines()]
                         local s = tostring(l1 and plain(l1:GetText())) .. "|" .. tostring(ln and plain(ln:GetText()))
                         if s ~= aura_sig then
@@ -1327,9 +1350,11 @@ do
                 if desc then break end
             end
         end
-        if not (e[1] or desc) then return false end
+        -- R953: the aura table has no name for spells named only through the by-EN name tables («Бонусы лагера»)
+        local nm = e[1] or (W.spell_name_be and W.spell_name_be(en))
+        if not (nm or desc) then return false end
         local kind = read(tt, "Right", 1)
-        box.name:SetText(e[1] or en)
+        box.name:SetText(nm or en)
         box.kind:SetText(kind and (W.ui_be(kind) or kind) or "")
         box.desc:SetText(desc or "")
         local w = math.max(220, math.min(320, (box.name:GetStringWidth() or 0) + (box.kind:GetStringWidth() or 0) + 40))
@@ -1353,7 +1378,9 @@ do
         -- English; the same box shows the Belarusian under it (nothing written into the tooltip)
         -- R434: also any buff tooltip that got no card (own buffs: the owner can be hidden from addons, the data
         -- secret or re-filled every second) — recognised by its data type (UnitAura) or line 1 being a known aura name
-        if not tt and W.dual_on() and GameTooltip:IsShown() and not W.dual_active(GameTooltip) then
+        -- R953 (owner screenshots: "Camp Benefits" / "Boosted Rest" buff tooltips stayed English): not only in bilingual
+        -- mode — any GameTooltip buff card still English (secret data, so nothing could be swapped) gets the box too
+        if not tt and GameTooltip:IsShown() and not W.dual_active(GameTooltip) then
             local ok, aura = pcall(function()
                 local o = GameTooltip:GetOwner()
                 if o and (o.auraInstanceID or o.buttonInfo or (o.GetName and (o:GetName() or ""):find("Aura"))) then return true end

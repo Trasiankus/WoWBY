@@ -102,7 +102,11 @@ function W.scan_quest_log()
             if W.needs_harvest(qid, "t") then W.harvest_quest(qid, "t", info.title) end
             if W.needs_harvest(qid, "d") or W.needs_harvest(qid, "o") then GetQuestLogQuestText(i) end  -- wrap records
             for _, ob in ipairs(C_QuestLog.GetQuestObjectives(qid) or {}) do
-                if ob.text and ob.text ~= "" then W.harvest("objectives", ob.text, qid) end
+                -- R958 (owner 2026-11-13: counter never back to 0): only lines WoWBY cannot show in Belarusian; every
+                -- objective of the log had been collected and re-counted each session until the next login prune
+                if ob.text and ob.text ~= "" and not W.obj_line_be(ob.text, qid) then
+                    W.harvest("objectives", ob.text, qid)
+                end
             end
         elseif info and info.isHeader then
             ztr(info.title)                                  -- zone headers: records misses

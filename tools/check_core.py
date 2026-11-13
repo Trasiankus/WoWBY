@@ -59,7 +59,7 @@ end
 def core_files():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from build_addon import CORE_FILES, DATA_FILES
-    data = DATA_FILES + ["quest_guard.lua", "forever.lua", "quest_sig.lua", "spells_items.lua", "ui.lua", "titles.lua", "questnpc.lua", "ru.lua"]
+    data = DATA_FILES + ["quest_guard.lua", "forever.lua", "quest_sig.lua", "spells_items.lua", "ui.lua", "titles.lua", "questnpc.lua", "books.lua", "ru.lua"]
     return CORE_FILES, data
 
 

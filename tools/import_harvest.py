@@ -45,6 +45,11 @@ def main():
                         d.setdefault(str(k), {}).update(v)
                     else:
                         d[str(k)] = v
+    merge(merged)
+
+
+def merge(merged):
+    """Accumulate {locale: {kind: {key: value}}} into data/harvest.json (also used by tools/import_paste.py, R965)."""
     out = os.path.join(ROOT, "data", "harvest.json")
     old = json.load(open(out, encoding="utf-8")) if os.path.exists(out) else {}
     for loc, kinds in merged.items():                     # accumulate across sessions / resets

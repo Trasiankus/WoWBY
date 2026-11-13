@@ -67,7 +67,7 @@ def main():
             k = pre + (it["en"] if pkg == "gossip" and isinstance(it.get("en"), str) else it["id"])
             sbe[k] = {"v": be}
     for it, be in chunks("quests_update"):                       # re-scraped fields: MERGE into the quest
-        q = sbe.setdefault("quest:" + it["id"], {})
+        q = sbe.setdefault("quest:" + it["id"].split("#")[0], {})        # R955: "99196#p" ids
         q.update({f: GPAIR.sub(r"$G\1:\2;", v) for f, v in be.items() if v})
     json.dump(sbe, open(os.path.join(ROOT, "data", "strings_be.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     n["quests/names/zones"] = len(sbe)
@@ -108,7 +108,7 @@ def main():
     record_only = "--record-only" in sys.argv
     n_skip = 0
     stale_rows, orig = [], {}
-    for pkg_, it, be in [(pkg, *x) for pkg in ("quests_address", "quests_unify", "quests_itemfix", "quests_speaker", "quests_capfix", "names_qa", "zones_qa", "quests_natural", "gossip_natural", "quests_classic_update") for x in chunks(pkg)]:
+    for pkg_, it, be in [(pkg, *x) for pkg in ("quests_address", "quests_unify", "quests_itemfix", "quests_speaker", "quests_capfix", "names_qa", "zones_qa", "quests_natural", "gossip_natural", "quests_classic_update", "quests_classic_update2") for x in chunks(pkg)]:
         tgt = it.get("target") or {}
         if not tgt and isinstance(it.get("en"), str) and isinstance(be, str):          # names_qa (target not in the queue)
             # names_qa / zones_qa: the queue item has no target; zones_qa items carry a zones note in "fix"
