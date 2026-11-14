@@ -3,7 +3,7 @@
 ## IconTexture: Interface\AddOns\WoWBY\icon
 ## Notes: Беларускі пераклад WoW Forever: заданні, імёны, размовы, прадметы, заклёны, мапы і інтэрфейс
 ## Author: Trasiankus
-## Version: 2026.11.14.3
+## Version: 2026.11.14.4
 ## SavedVariables: WoWBY_DB
 ## AddonCompartmentFunc: WoWBY_OnCompartmentClick
 ## X-License: GPL-3.0
