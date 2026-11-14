@@ -201,6 +201,15 @@ function W.hook_messages()
         -- args after msg: author, language, channelString (a4), target, flags, zoneID, channelNumber, channelBaseName (a9)
         local function player(_, _, msg, a2, a3, a4, a5, a6, a7, a8, a9, ...)
             local ok, lk = pcall(links_be, plain(msg))
+            -- R991 (owner screenshot): the server's LocalDefense notice "Tirisfal Glades is under attack!" (no author,
+            -- ZONE_UNDER_ATTACK) → «Тырысфальскія паляны — пад атакай!»; the colour code, if any, is kept
+            local pm = plain(msg)
+            if pm and W.is_be() and W.on("ui") and (plain(a2) or "") == "" then
+                local col, zn, r = pm:match("^(|c%x%x%x%x%x%x%x%x)(.-) is under attack!(|r)$")
+                if not zn then col, r = "", ""; zn = pm:match("^(.-) is under attack!$") end
+                local zb = zn and (W.Z[zn] or W.Z[W.strtrim(zn)])
+                if zb then ok, lk = true, col .. zb .. " — пад атакай!" .. r end
+            end
             local chat_on = WoWBY_DB and WoWBY_DB.chat_be            -- channel names only with the option (R127)
             local ok4, c4 = chat_on and pcall(channel_be, a4)
             local ok9, c9 = chat_on and pcall(channel_be, a9)
