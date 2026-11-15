@@ -75,7 +75,9 @@ if TooltipDataProcessor and Enum and Enum.TooltipDataType then
         W.TIP.keep[tt] = nil
         if type(guid) == "string" and guid:find("^Player") and data.lines and data.lines[2] then
             local g = plain(data.lines[2].leftText)
-            if g and not g:find("^" .. (LEVEL or "Level") .. " ") then W.TIP.keep[tt] = { text = g, at = GetTime() } end
+            -- R1003 (owner, ruRU): the Russian level line puts the race first («Таурен 7-го уровня (игрок)») → not a guild
+            local lvl = g and (g:find("^" .. (LEVEL or "Level") .. " ") or (W.RU and g:find("%d+%-го уровня", 1)))
+            if g and not lvl then W.TIP.keep[tt] = { text = g, at = GetTime() } end
         end
         -- a PLAYER's name in their class colour (owner 2026-10-07), like the class line under it; NPCs keep Blizzard's
         -- reaction colours
@@ -101,6 +103,17 @@ if TooltipDataProcessor and Enum and Enum.TooltipDataType then
             local fem = type(u) == "string" and UnitSex(u) == 3
             local t = fem and (WoWBY_TitlesF or {})[lt2] or TITLES[lt2]
             if t then l2.leftText = t end
+        end
+        -- R1003 (owner, ruRU NPC tooltip «Уровень 14» → «Ранг 14»): Russian uses one word for a unit's level and a spell's
+        -- rank, and the exact-text table knows it as the spell rank → in a UNIT tooltip it is the level
+        if W.RU and type(TOOLTIP_UNIT_LEVEL) == "string" and data.lines then
+            local lp = "^" .. TOOLTIP_UNIT_LEVEL:gsub("%%s", "(%%S+)") .. "$"
+            for i = 2, math.min(#data.lines, 4) do
+                local x = plain(data.lines[i].leftText)
+                local n = x and x:match(lp)
+                local b = n and W.ui_be("Level " .. n)
+                if b then data.lines[i].leftText = b end
+            end
         end
         -- a player's pet: "Grob Vuujin's Pet". Hunter pets have no NPC guid (block above skipped); some pets DO have a
         -- Creature guid ("Tiparican Swiftmane's Pet" stayed English, R306) → tried for both

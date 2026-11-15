@@ -12,9 +12,12 @@ end
 local function esc_pat(s) return (s:gsub("%p", "%%%0")) end
 
 -- the server fills in the player's name / race / class: put $N / $R / $C back (as the source text has them)
-local function token_key(k)
+-- R1001 (harvest 2026-11-15, Hallowed Scroll): letters may write the name in capitals ("…to the Nether, RUDZI.") and
+-- keep the class literal ("Priest Trainer") → name_only tries the name alone, any case
+local function token_key(k, name_only)
     local me = plain(UnitName("player"))
-    if me and me ~= "" then k = k:gsub(esc_pat(me), "$N") end
+    if me and me ~= "" then k = k:gsub(esc_pat(me), "$N"):gsub(esc_pat(me:upper()), "$N") end
+    if name_only then return k end
     local race, class = plain((UnitRace("player"))), plain((UnitClass("player")))
     if race and race ~= "" then k = k:gsub(esc_pat(race), "$R") end
     if class and class ~= "" then k = k:gsub(esc_pat(class), "$C") end
@@ -44,7 +47,8 @@ function W.book_be(t)
     t = plain(t)
     if not t or t == "" then return nil end
     local k = page_key(t)
-    return W.B[k] or W.B[token_key(k)] or loose_be(k) or loose_be(token_key(k))
+    return W.B[k] or W.B[token_key(k, true)] or W.B[token_key(k)] or loose_be(k) or loose_be(token_key(k, true))
+        or loose_be(token_key(k))
 end
 
 local function title_be(t)

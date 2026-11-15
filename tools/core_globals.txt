@@ -118,7 +118,6 @@ QuestInfoDescriptionText
 QuestInfoFrame
 QuestInfoObjectivesText
 QuestInfoTitleHeader
-QuestLogQuests_Update
 QuestMapFrame
 QuestMapFrame_GetDetailQuestID
 QuestScrollFrame
@@ -136,6 +135,7 @@ SkillsFrame
 SkillsHeaderMixin
 SlashCmdList
 StaticPopup_FindVisible
+TOOLTIP_UNIT_LEVEL
 TRADE_ENCHANT_SLOT
 TooltipComparisonManager
 TooltipDataProcessor

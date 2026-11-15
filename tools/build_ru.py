@@ -135,7 +135,10 @@ def collect():
     ENCH_TPL.clear()
     P = Pairs()
     # GlobalStrings (plain strings; formats are WoWBY_RUF below)
-    gs = []
+    # R1003 (owner, ruRU micro-menu tooltip «Открывается на 10-м уровне.»): the live Forever ruRU wording differs from the
+    # dump's RU column («Доступно после достижения %d-го уровня.») → hand pairs, read first
+    gs = [("FEATURE_BECOMES_AVAILABLE_AT_LEVEL", "This feature becomes available at level %d.",
+           "Открывается на %d-м уровне.")]
     for r in tsv(os.path.join(ROOT, "out", "globalstrings_keys.tsv")):
         if len(r) < 3 or not r[2]:
             continue
@@ -478,10 +481,13 @@ def index_words(ru):
     return out
 
 
+FMT_PREFER = {"Level %s"}
+
+
 def ru_formats(gs):
     """[(pattern, [EN parts\u2026], index words)] most specific first. One RU pattern can stand for several EN formats
     (\u00AB\u0412\u0430\u0448\u0430 \u0434\u043E\u0431\u044B\u0447\u0430: %s.\u00BB = "You receive loot: %s" and "You loot %s"): the runtime tries each."""
-    by_pat = {}
+    by_pat, pref_pats = {}, set()
     for key, en, ru in gs:
         if not FMT_TOKEN.search(en) or en == ru or key.startswith(("SLASH_", "DEBUG")):
             continue
@@ -496,7 +502,11 @@ def ru_formats(gs):
             continue
         e = by_pat.setdefault(pat, [[], ws])
         if parts not in e[0]:
-            e[0].append(parts)
+            # R1003 (owner, ruRU NPC tooltip «Уровень 14» → «Ранг 14»): one RU format for several EN ones — the reading the
+            # client shows most goes first
+            e[0].insert(0, parts) if en in FMT_PREFER else e[0].append(parts)
+        if en in FMT_PREFER:
+            pref_pats.add(pat)
     # enchant name templates ($k1 / $123s2 tokens, filled in by the client): RU → EN by token
     for en, ru in ENCH_TPL:
         pat, toks = lua_pattern(ru.replace("\r", ""))
@@ -510,6 +520,8 @@ def ru_formats(gs):
     out = []
     for pat, (alts, ws) in by_pat.items():
         spec = len(re.sub(r"\(\.-\)|\(%[^)]*\)|\[\^%s\]-", "", pat))
+        if pat in pref_pats:                     # R1003: tried before the other formats of the same words
+            spec += 1000
         out.append((spec, pat, alts, ws))
     out.sort(key=lambda x: (-x[0], x[1]))
     return [(p, alts, ws) for _, p, alts, ws in out]
@@ -534,7 +546,9 @@ RACES_F = {"Ночная эльфийка": "Night Elf", "Дворфийка": "
            "Небеснорожденная из Ваятелей ветра": "Windshaper Skyborne"}
 # one Russian word for several English ones: the reading the client shows most (R666 «Мир» on the map home button,
 # R668 «Персональный предмет» = Soulbound far more often than "No Drop")
-PREFER = {"Персональный предмет": "Soulbound", "Мир": "World"}
+PREFER = {"Персональный предмет": "Soulbound", "Мир": "World",
+          # R1003 (owner, ruRU death popup): Recap and Guild Information are both «Информация»; the plain word fits both
+          "Информация": "Recap"}
 
 
 # Russian declension (R803/R804): RU formats wrap a value as |3-N(%s), and the client swaps the word for its N-th form from
@@ -684,7 +698,8 @@ def build(ru_desc=None, stats=False):
                     m[ru][en] += c
         res = {ru: [e for e, _ in sorted(c.items(), key=lambda kv: (-kv[1], kv[0]))][:4] for ru, c in m.items()}
         for ru, en in PREFER.items():
-            if dom == "ui" and en in res.get(ru, []):
+            # R1003: the preferred word may fall outside the 4 most common EN readings ("Recap") → put it first anyway
+            if dom == "ui" and ru in res:
                 res[ru] = [en] + [e for e in res[ru] if e != en]
         emit_map(L, "WoWBY_RU.%s" % dom, res)
         counts[dom] = len(res)
