@@ -229,7 +229,7 @@ local function place(f, plate, uf, s)
         f[k]:SetShadowOffset(hb and 1.7 or 0, hb and -1.7 or 0); f[k]:SetShadowColor(0, 0, 0, hb and 1 or 0)
     end
 end
-local function style_plate(plate)
+local function style_plate_raw(plate)
     local uf = plate and plate.UnitFrame
     if not uf or (uf.IsForbidden and uf:IsForbidden()) then return end
     local unit = uf.unit
@@ -284,7 +284,7 @@ local function style_plate(plate)
     -- players' pets / guardians / minions and critters / companions follow Blizzard's own "Minions" / "Critters"
     -- checkboxes (R253, owner 2026-10-08; were WoWBY copies np_minions / np_critters)
     local owned = UnitPlayerControlled(unit)
-    local critter = not owned and UnitCreatureType and UnitCreatureType(unit) == "Critter"
+    local critter = not owned and UnitCreatureType and plain(UnitCreatureType(unit)) == "Critter"
     local show
     if owned or critter then
         show = hide and (UnitIsUnit(unit, "target")
@@ -344,6 +344,9 @@ local function style_plate(plate)
     f:Show()
     soft_icon(f, uf, unit)
 end
+-- R1000 (owner 2026-11-15, Ragefire Chasm: 31× a secret creature type): a secret value inside an instance must never
+-- become a Lua error per plate — that plate just keeps Blizzard's look
+local function style_plate(plate) pcall(style_plate_raw, plate) end
 function W.set_np_bars(v)                                    -- R743: the with-bars mode switch (options window)
     WoWBY_DB.np_bars = v or nil
     W.style_all_plates()

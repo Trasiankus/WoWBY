@@ -709,6 +709,8 @@ FEM_HEADS = {"Матрос": "Матроска",   # R941 owner: female Kul Tira
              # R987 (owner screenshot: female Orgrimmar Grunt): рубака is common gender → only the adjective turns
              # («Аргрымарская рубака»)
              "Рубака": "Рубака",
+             # R998 (owner screenshot: female Royal Dreadguard) «Каралеўская жахавартавая»
+             "Жахавартавы": "Жахавартавая",
              # R468: mob names made masculine again (review/fem_mobs.py) need their feminine back for female NPCs
              "Засаднік": "Засадніца", "Нападнік": "Нападніца", "Галаварэз": "Галаварэзка", "Пяхотнік": "Пяхотніца",
              "Рабаўнік": "Рабаўніца", "Святар": "Святарка",

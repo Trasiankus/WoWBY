@@ -462,6 +462,8 @@ function W.is_group_name(s)
 end
 function W.harvest(kind, key, val)
     if not (W.hv_on() and type(key) == "string" and key ~= "") then return end
+    -- R996 (harvest 2026-11-14): our own text read back («Згубленая рэч», a mail subject already swapped) is not new
+    if W.ours and W.ours(key) then return end
     -- R391: gossip as the world DB writes it — the player's name / race / class back to $N / $R / $C ("Your legacy
     -- precedes you, druid." → "…, $C."), else the line is queued per character and its translation fits one class only
     if kind == "gossip" and W.player_tokens then key = W.player_tokens(key) end
