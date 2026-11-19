@@ -126,7 +126,10 @@ end
 if TooltipDataProcessor and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Object then
     W.TIP.pre(Enum.TooltipDataType.Object, function(tt, data)
         local l1 = W.on("names") and data and data.lines and data.lines[1]
-        local be = l1 and W.name_be(plain(l1.leftText))       -- misses are harvested like NPC names
+        -- R1004 (harvest 2026-11-18: "A Letter to Yvette" on the ground = item 2839): an object named like an item takes
+        -- the item's name before the NPC-name lookup (which harvests its misses)
+        local en = l1 and plain(l1.leftText)
+        local be = en and ((W.IE and W.IE[en]) or W.name_be(en))       -- misses are harvested like NPC names
         if be then l1.leftText = be end
     end)
 end

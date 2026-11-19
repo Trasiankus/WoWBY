@@ -17,6 +17,7 @@ C_Spell
 C_Timer
 C_TooltipInfo
 C_TradeSkillUI
+C_UnitAuras
 ChatFrameUtil
 CheckInteractDistance
 ConsoleGetAllCommands
@@ -127,6 +128,7 @@ RecentAlliesEntryMixin
 SECOND_ONELETTER_ABBR
 SELL_PRICE
 SLASH_WOWBY1
+SecondsToTimeAbbrev
 SetUnitCursorTexture
 Settings
 ShoppingTooltip1

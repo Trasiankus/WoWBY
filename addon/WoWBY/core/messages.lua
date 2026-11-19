@@ -984,44 +984,110 @@ end
 -- line ("message" or "Sender: message", SUBTITLE_FORMAT) into its Subtitles FontStrings and sizes the background from
 -- the text right after → a SetText post-hook per FontString swaps before the measure. Lookup = NPC speech (W.gossip_be:
 -- BroadcastText lines in gossip_fix / the gossip tables); misses are harvested as gossip.
--- Buff / debuff timers under the icons (R51, owner trial 2026-11-05; shipped R829 as the option «Працягласць эфектаў (60 хв)»
--- under «Заклёны і прадметы», WoWBY_DB.buff_times, on unless false): "40 m" → «40 хв». Blizzard writes them every frame with
--- SetFormattedText; the post-hook swaps in the same call, so no blink. A secret text in combat stays English (plain = nil).
--- EXPERIMENT: a per-object hook on these frames is what R29 warned about. If Edit Mode / action bars break, remove this block
--- + "hook_buff_times" in events.lua.
--- The owner saw «60 m» stay after a fight: the button keeps its aura data from combat, so the time stays secret and GetText
--- gives nothing. The format arrives plain, though, with only the number secret: Blizzard's own format is swapped and the
--- value passed on untouched, never read (widgets take secret values). Works in combat too, if the client allows it.
-local buff_fmt, buff_busy
-local function buff_time_set(fs, fmt, ...)
-    if buff_busy or not (W.is_be() and W.on("spells")) or WoWBY_DB.buff_times == false or W.RU or issecretvalue and issecretvalue(fmt) then return end
-    if not buff_fmt then
-        buff_fmt = {}
+-- Buff / debuff timers under the icons (R51 / R829 option «Працягласць эфектаў (60 хв)», WoWBY_DB.buff_times, on unless
+-- false): "40 m" → «40 хв».
+-- R1009 (owner 2026-11-18): the R829 way — hooksecurefunc(b.Duration, "SetFormattedText") — wrote our hook into Blizzard's
+-- aura buttons; at a level-up (PLAYER_SPECIALIZATION_CHANGED → Edit Mode re-anchors the buff frame) Blizzard then read
+-- auras tainted: "GetAuraDataByIndex(): Auras cannot be accessed when secret while tainted by 'WoWBY'". Now the same way as
+-- the target-of-target label (R952): OUR FontString, a region of the button made out of combat and kept in our own table,
+-- laid over Blizzard's timer; Blizzard's timer only faded with SetAlpha (a display call). A 0.2 s ticker READS Blizzard's
+-- text and writes the BE form into our label. No hook, no field, no SetText on Blizzard's objects. A secret text (combat)
+-- or an unknown one → our label hides and Blizzard's English timer shows.
+local buff_rx                                         -- { {Lua pattern of the EN abbreviation, BE format}, … }
+local function buff_be(t)
+    if not buff_rx then
+        buff_rx = {}
         for k, be in pairs({ DAY_ONELETTER_ABBR = "%d д", HOUR_ONELETTER_ABBR = "%d г", MINUTE_ONELETTER_ABBR = "%d хв",
                              SECOND_ONELETTER_ABBR = "%d с" }) do
-            if type(_G[k]) == "string" then buff_fmt[_G[k]] = be end
-        end
-    end
-    local be = buff_fmt[fmt]
-    if be then
-        buff_busy = true
-        pcall(fs.SetFormattedText, fs, be, ...)
-        buff_busy = false
-    end
-end
-local buff_times_hooked = false
-function W.hook_buff_times()
-    if buff_times_hooked then return end
-    for _, c in ipairs({ _G.BuffFrame, _G.DebuffFrame }) do
-        for _, b in ipairs(c and c.auraFrames or {}) do
-            -- R855: auraFrames also holds the PrivateAuraAnchors, whose Duration is no FontString (logged an error at
-            -- every login since R827)
-            if b.Duration and type(b.Duration.SetFormattedText) == "function" then
-                buff_times_hooked = true
-                hooksecurefunc(b.Duration, "SetFormattedText", buff_time_set)
+            local en = _G[k]
+            if type(en) == "string" and en:find("%d", 1, true) then
+                local pat = "^" .. en:gsub("%%d", "\1"):gsub("%p", "%%%0"):gsub("\1", "(%%d+)") .. "$"
+                buff_rx[#buff_rx + 1] = { pat, be }
             end
         end
     end
+    for _, r in ipairs(buff_rx) do
+        local n = t:match(r[1])
+        if n then return r[2]:format(tonumber(n)) end
+    end
+end
+-- R1012 (owner: "it randomly stops translating" — after a fight the button's text stays SECRET, so GetText gives nothing):
+-- the time is then rebuilt from the button's own numbers, read only (timeLeft, else buttonInfo.expirationTime, else the
+-- aura by its instance id out of combat), through Blizzard's own SecondsToTimeAbbrev → the same rounding as the timer
+local BUFF_FMT_BE
+local function plain_num(v)
+    if type(v) == "number" and not (issecretvalue and issecretvalue(v)) then return v end
+end
+local function buff_secs(b)
+    local s = plain_num(b.timeLeft)
+    if s then return s end
+    local bi = b.buttonInfo
+    local exp = type(bi) == "table" and plain_num(bi.expirationTime)
+    if exp and exp > 0 then return exp - GetTime() end
+    local id = type(bi) == "table" and plain_num(bi.auraInstanceID)
+    if id and not InCombatLockdown() and C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID then
+        local ok, a = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, "player", id)
+        local e2 = ok and type(a) == "table" and plain_num(a.expirationTime)
+        if e2 and e2 > 0 then return e2 - GetTime() end
+    end
+end
+local function buff_be_secs(secs)
+    if not (secs and secs > 0 and SecondsToTimeAbbrev) then return nil end
+    if not BUFF_FMT_BE then
+        BUFF_FMT_BE = {}
+        for k, be in pairs({ DAY_ONELETTER_ABBR = "%d д", HOUR_ONELETTER_ABBR = "%d г", MINUTE_ONELETTER_ABBR = "%d хв",
+                             SECOND_ONELETTER_ABBR = "%d с" }) do
+            if type(_G[k]) == "string" then BUFF_FMT_BE[_G[k]] = be end
+        end
+    end
+    local ok, fmt, v = pcall(SecondsToTimeAbbrev, secs)
+    local be = ok and BUFF_FMT_BE[fmt]
+    return be and type(v) == "number" and be:format(v) or nil
+end
+local buff_labels = {}                                -- Blizzard Duration FontString -> our FontString
+local function buff_tick()
+    local on = W.is_be() and W.on("spells") and WoWBY_DB.buff_times ~= false and not W.RU
+    for _, c in ipairs({ _G.BuffFrame, _G.DebuffFrame }) do
+        for _, b in ipairs(c and c.auraFrames or {}) do
+            -- R855: auraFrames also holds the PrivateAuraAnchors, whose Duration is no FontString
+            local d = b.Duration
+            if d and type(d.GetText) == "function" and type(d.SetAlpha) == "function" then
+                local l = buff_labels[d]
+                local vis = on and b:IsVisible() and d:IsShown()
+                local t = vis and plain(d:GetText())
+                local be = t and t ~= "" and buff_be(t)
+                if vis and not be and not t then be = buff_be_secs(buff_secs(b)) end
+                if be and not l and not InCombatLockdown() then
+                    local layer, sub = d:GetDrawLayer()
+                    l = (d:GetParent() or b):CreateFontString(nil, layer or "OVERLAY")
+                    if sub then pcall(l.SetDrawLayer, l, layer or "OVERLAY", math.min(sub + 1, 7)) end
+                    l:SetWordWrap(false)
+                    buff_labels[d] = l
+                end
+                if be and l then
+                    -- centred on Blizzard's timer at its own width: SetAllPoints cut «40 хв» to «40…» (the box fits "40 m")
+                    l:ClearAllPoints(); l:SetPoint("CENTER", d, "CENTER", 0, 0)
+                    l:SetFontObject(d:GetFontObject() or GameFontNormalSmall)
+                    local ff, fsz, ffl = d:GetFont()
+                    if ff and type(fsz) == "number" and fsz > 0 then pcall(l.SetFont, l, W.by_font(ff) or ff, fsz, ffl or "") end
+                    l:SetJustifyH(d:GetJustifyH() or "CENTER")
+                    local ok, r, g, bb = pcall(d.GetTextColor, d)
+                    if ok and type(r) == "number" and not (issecretvalue and issecretvalue(r)) then l:SetTextColor(r, g, bb) end
+                    l:SetText(be); l:Show()
+                    d:SetAlpha(0)
+                else
+                    if l then l:Hide() end
+                    if l or d:GetAlpha() == 0 then d:SetAlpha(1) end
+                end
+            end
+        end
+    end
+end
+local buff_times_started = false
+function W.hook_buff_times()
+    if buff_times_started or not (C_Timer and C_Timer.NewTicker) then return end
+    buff_times_started = true
+    C_Timer.NewTicker(0.2, function() pcall(buff_tick) end)
 end
 local subs_hooked = false
 function W.hook_subtitles()
