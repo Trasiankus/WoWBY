@@ -62,9 +62,12 @@ def main():
         if missing: sys.exit("no such done chunk: " + ", ".join(missing))
     ack = set(json.load(open(ACK, encoding="utf-8"))) if os.path.exists(ACK) else set()
     jobs = []
+    # check the text as it SHIPS: the owner rules (terms_rules.fix_terms: дварф → дворф, word_fix, yakanne_fix…) run at
+    # import; checking the raw draft reported what the rules already fix (2026-11-20: «пад дварфа»)
+    from terms_rules import fix_terms
     for c in chunks:
         t, keep = texts_of(c)
-        jobs.append((c, t, keep))
+        jobs.append((c, [(w, i, en, fix_terms(be)) for w, i, en, be in t], keep))
     from qa_lines import QA
     qa = QA([x[3] for _, t, _ in jobs for x in t])
     found = []
