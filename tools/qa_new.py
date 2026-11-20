@@ -70,13 +70,26 @@ def main():
         jobs.append((c, [(w, i, en, fix_terms(be)) for w, i, en, be in t], keep))
     from qa_lines import QA
     qa = QA([x[3] for _, t, _ in jobs for x in t])
-    found = []
+    # judge the text that SHIPS (2026-11-20: a re-imported old chunk raised 19 findings on draft text that later
+    # data/be fixes had replaced): a draft text that ships verbatim → every finding; otherwise a finding stays only if
+    # its flagged span still occurs somewhere in data/be
+    shipped, blob = set(), []
+    for p in glob.glob(os.path.join(ROOT, "data", "be", "*.json")):
+        for e in json.load(open(p, encoding="utf-8")).values():
+            b = e.get("be") if isinstance(e, dict) else None
+            if isinstance(b, str):
+                shipped.add(b.strip()); blob.append(b.lower())
+    blob = "\n".join(blob)
+    found, stale = [], 0
     for c, t, keep in jobs:
         rel = os.path.relpath(c, os.path.join(ROOT, "translate", "done")).replace("\\", "/")
         for where, iid, en, be in t:
+            ships = be.strip() in shipped
             for w in qa.check(be, en, 2):
                 m = re.search(r"«([^»]*)»", w)
                 if m and (iid, m.group(1).lower()) in keep: continue
+                if not ships and m and m.group(1).lower() not in blob:
+                    stale += 1; continue
                 h = hashlib.md5(("%s|%s|%s" % (rel, where, w)).encode("utf-8")).hexdigest()[:12]
                 found.append((h, rel, where, w))
     open_ = [f for f in found if f[0] not in ack]
@@ -91,7 +104,7 @@ def main():
         o.write("OPEN: %d\n\n" % len(open_))
         for h, rel, where, w in open_:
             o.write("- `%s` %s %s — %s\n" % (h, rel, where[:60], w))
-    print("QA of new translations: %d chunks, %d texts, %d OPEN findings -> %s" % (
+    print("QA of new translations (%d findings on draft text that no longer ships skipped): %d chunks, %d texts, %d OPEN findings -> %s" % (stale, 
         len(chunks), sum(len(t) for _, t, _ in jobs), len(open_), os.path.relpath(REPORT, ROOT)))
     for h, rel, where, w in open_[:15]:
         print("  %s %s — %s" % (rel, where[:40], w[:150]))
