@@ -90,10 +90,22 @@ end
 
 -- ---------- harvest: quest log scan (titles, description, objective lines), throttled ----------
 local last_scan = 0
+-- R1017 (perf audit: the scan ran on the FIRST QUEST_LOG_UPDATE of each progress burst = at the very moment of the
+-- kill / loot): now one scan 3 s after the burst, never in combat (retried after it)
+local scan_pending = false
+local scan_now
 function W.scan_quest_log()
+    if scan_pending or not W.hv_on() then return end
+    scan_pending = true
+    C_Timer.After(3, function()
+        scan_pending = false
+        if InCombatLockdown() then W.scan_quest_log(); return end
+        pcall(scan_now)
+    end)
+end
+function scan_now()
     if not W.hv_on() or not (C_QuestLog and C_QuestLog.GetNumQuestLogEntries) then return end
     local now = GetTime()
-    if now - last_scan < 3 then return end
     last_scan = now
     for i = 1, C_QuestLog.GetNumQuestLogEntries() do
         local info = C_QuestLog.GetInfo(i)
@@ -114,4 +126,5 @@ function W.scan_quest_log()
     end
 end
 
+scan_now = W.timed("quest log scan", scan_now)   -- R1015 profiler
 W.hook_zones()

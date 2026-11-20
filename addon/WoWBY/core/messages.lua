@@ -192,10 +192,21 @@ local PLAYER_EVENTS = { "CHAT_MSG_CHANNEL", "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CH
 function W.hook_messages()
     local add = (ChatFrameUtil and ChatFrameUtil.AddMessageEventFilter) or _G.ChatFrame_AddMessageEventFilter
     if add then
+        -- R1015: a chat filter runs once PER CHAT FRAME for the same message (5 tabs = 5 full lookups of every loot /
+        -- XP / quest line) → the last answer is reused for the same event + text within the same moment
+        local memo_k, memo_v, memo_t
         local function filter(_, event, msg, ...)
-            local be = msg_be(msg, event)
-            local lk = links_be(be or plain(msg))
-            be = lk or be
+            local p = plain(msg)
+            local key = p and (event .. "" .. p)
+            local be
+            if key and key == memo_k and memo_t == GetTime() then
+                be = memo_v
+            else
+                be = msg_be(msg, event)
+                local lk = links_be(be or p)
+                be = lk or be
+                if key then memo_k, memo_v, memo_t = key, be, GetTime() end
+            end
             if be then return false, be, ... end
         end
         -- args after msg: author, language, channelString (a4), target, flags, zoneID, channelNumber, channelBaseName (a9)
@@ -219,7 +230,9 @@ function W.hook_messages()
                 return false, lk or msg, a2, l3 or a3, c4 or a4, a5, a6, a7, a8, c9 or a9, ...
             end
         end
+        player = W.timed("chat player", player)
         for _, e in ipairs(PLAYER_EVENTS) do pcall(add, e, player) end
+        filter = W.timed("chat system", filter)
         for _, e in ipairs(CHAT_EVENTS) do pcall(add, e, filter) end
         -- chat language tag «[Darnassian] …» (the event's language arg, owner R555): feminine adjective = «мова»
         local LANG = { Common = "Агульная", Darnassian = "Дарнаская", Orcish = "Арчыная", Dwarvish = "Дварфійская",
@@ -242,11 +255,12 @@ function W.hook_messages()
                 return false, (ok and be) or msg, (ok and abe) or author, lb or lang, ...
             end
         end
+        speech = W.timed("chat speech", speech)
         for _, e in ipairs(SPEECH_EVENTS) do pcall(add, e, speech) end
     end
     local ef = _G.UIErrorsFrame
     if ef and ef.AddMessage then
-        hooksecurefunc(ef, "AddMessage", function(self, msg, r, g, b, a, id)
+        hooksecurefunc(ef, "AddMessage", W.timed("centre message", function(self, msg, r, g, b, a, id)
             -- quest progress ("Bloodfeather Belt: 4/6", "Gnarlpine Mystic slain: 3/7") = objective lines (R19)
             -- R838: whole objective lines too, with "(Complete)" ("Cleanse the Winterhoof Water Well (Complete)")
             local p = plain(msg)
@@ -265,7 +279,7 @@ function W.hook_messages()
                 end
             end
             swap(); C_Timer.After(0, swap)
-        end)
+        end))
     end
     -- system lines Blizzard writes straight into a chat frame (R536: "You gained: 1s 58c" money receipt, crafting
     -- orders…): ChatFrameUtil.DisplaySystemMessageInPrimary / InCurrent → AddMessage, no event, no filter. Post-hook:

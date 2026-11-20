@@ -89,6 +89,9 @@ end
 
 -- ---------- refresh (after any settings change) ----------
 function W.refresh()
+    if W.qtitles_dirty then W.qtitles_dirty() end         -- R1017: cached quest titles follow language / name changes
+    if W.tl_cache_wipe then W.tl_cache_wipe() end
+    if W.panel_seen_wipe then W.panel_seen_wipe() end
     W.apply_labels(); W.apply_standings(); W.apply_search_boxes(); W.apply_chat_tabs(); if W.apply_chat_words then W.apply_chat_words() end; W.apply_buttons(); W.tr_zone_text(); W.target_name()
     for _, p in ipairs({ "QuestFrameDetailPanel", "QuestFrameProgressPanel", "QuestFrameRewardPanel", "QuestFrameGreetingPanel" }) do
         local fr = _G[p]

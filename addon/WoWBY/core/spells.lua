@@ -298,6 +298,18 @@ local function tr_desc_lines(lines, key, prefix_en, prefix_be)
         end
     end
 end
+-- one drawn "Use:" line of item `id` by the item's own spell (the same path as the Item pre-call below); EasyGreenStats
+-- late pass (tooltips.lua) for the lines it left long
+function W.item_use_be(id, t)
+    if not (W.on("spells") and id and type(t) == "string") then return nil end
+    local sid = C_Item and C_Item.GetItemSpell and select(2, C_Item.GetItemSpell(id))
+    local lines = { {}, { leftText = t } }
+    if sid and tr_desc_lines(lines, SK[sid], use_prefix(), "Ужыць: ") then return lines[2].leftText end
+    local body = t:match("^" .. esc(use_prefix()) .. "(.+)$")
+    for _, k in ipairs(body and W.desc_keys_by_start(body) or {}) do
+        if tr_desc_lines(lines, k, use_prefix(), "Ужыць: ") then return lines[2].leftText end
+    end
+end
 if TooltipDataProcessor and Enum and Enum.TooltipDataType then
     W.TIP.pre(Enum.TooltipDataType.Spell, function(tt, data)
         local id = data and W.sid_ok(data.id)
@@ -413,7 +425,12 @@ function W.hook_spellbook()
             pcall(fs.SetFont, fs, file, s, flags or "")
         end
     end
+    -- R1016 (owner 2026-11-19: a lag when learning a new ability): learning a spell refreshes the paged frame even while
+    -- the book is CLOSED, and every refresh re-fitted every name (SetFont reset + shrink loop = a re-layout per step).
+    -- Now: nothing while hidden (OnShow does the page), and a name is re-fitted only when its text or mode changed.
+    local fitted = setmetatable({}, { __mode = "k" })
     local function update()
+        if not sb:IsVisible() then return end
         local be_mode = W.is_be() and W.on("spells")
         for _, fr in paged:EnumerateFrames() do
             local info = fr.spellBookItemInfo
@@ -425,7 +442,11 @@ function W.hook_spellbook()
                         or (en and (WoWBY_SpellNamesEN or {})[en])
                     if be and en and be ~= en then W.swap(fr.Name, be) end
                 end
-                pcall(fit, fr.Name, be_mode)
+                local key = tostring(be_mode) .. (plain(fr.Name:GetText()) or "")
+                if fitted[fr.Name] ~= key then
+                    pcall(fit, fr.Name, be_mode)
+                    fitted[fr.Name] = key
+                end
             end
         end
     end

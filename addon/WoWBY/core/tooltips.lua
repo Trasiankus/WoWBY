@@ -157,9 +157,178 @@ local function multiline_be(t)
     end
     return table.concat(out, "\n")
 end
+-- R1017 (perf audit: item comparison rebuilds several times a second and every pass re-ran each line through the whole
+-- rule chain): results are cached per text + the female-unit flag; wiped when the quest log changes (titles), on
+-- W.refresh (language / name option) and when it grows past 3000 entries. A line that is already Belarusian with no
+-- Latin word left in it returns at once.
+local tl_cache, tl_n = { [true] = {}, [false] = {} }, 0
+local function tl_wipe() tl_cache = { [true] = {}, [false] = {} }; tl_n = 0 end
+W.tl_cache_wipe = tl_wipe
+do
+    local cf = CreateFrame("Frame")
+    for _, ev in ipairs({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN" }) do
+        pcall(cf.RegisterEvent, cf, ev)
+    end
+    cf:SetScript("OnEvent", tl_wipe)
+end
+-- EasyGreenStats (owner 2026-11-20): it shortens English item lines ("Equip: Improves your chance to hit by 1%." →
+-- "+1% Hit") in its own tooltip post-call. With it on, the pre-calls leave those lines English (W.egs_skip, base.lua
+-- TIP wrappers), EGS converts them, and the post pass (tr_tooltip → tooltip_line_be) translates its short form; lines
+-- EGS left alone are translated there as usual. EGS only works on English clients; the bilingual card is untouched.
+local function egs_db()
+    if not W.egs_hooked or W.RU or W.dual_on() then return nil end      -- EGS not loaded: one field read, nothing else
+    local db = rawget(_G, "EasyGreenStatsDB")
+    if type(db) ~= "table" or not db.enabled then return nil end
+    local loc = GetLocale and GetLocale()
+    if loc ~= "enUS" and loc ~= "enGB" then return nil end
+    return db
+end
+W.egs_db = egs_db
+function W.egs_skip(t)
+    local db = type(t) == "string" and egs_db()
+    if not db then return false end
+    if t:find("^Equip: ") then return true end
+    if db.enchants and t:find("^Enchanted: ") then return true end
+    if (db.buffFood or db.buffElixir or db.buffScroll) and t:find("^Use: ") then return true end
+    if db.intellectAP and t:find("^%+%d+ Intellect$") then return true end
+    return false
+end
+local EGS_L = { ["Spell Damage"] = "Урон ад заклёнаў", ["Spell Healing"] = "Магічнае лячэнне",
+    ["Spell Power"] = "Сіла заклёнаў", ["Critical Chance"] = "Крыт. удар", Hit = "Трапнасць", Haste = "Хуткасць",
+    ["Attack Power"] = "Сіла атакі", ["Ranged Attack Power"] = "Сіла дальняй атакі", AP = "Сіла атакі",
+    ["Mana per 5 sec"] = "Мана за 5 сек.", ["Health per 5 sec"] = "Здароўе за 5 сек.",
+    ["Maximum Energy"] = "Максімум энергіі", ["Maximum Health"] = "Максімум здароўя",
+    ["Defense Skill"] = "Навык абароны", Dodge = "Ухіленне", Parry = "Парыраванне",
+    ["Block Chance"] = "Шанец блакавання", ["Shield Block Value"] = "Велічыня блакавання",
+    ["Spell Penetration"] = "Пранікальная здольнасць заклёнаў",
+    ["Magical Resistance Pierce"] = "Прабіванне магічнага супраціўлення",
+    ["Physical Damage"] = "Фізічны ўрон", ["Melee Attack Power"] = "Сіла атакі ў блізкім баі", XP = "досведу" }
+local EGS_UNIT = { sec = "сек.", secs = "сек.", second = "сек.", seconds = "сек.", min = "хв.", mins = "хв.",
+    minute = "хв.", minutes = "хв.", hr = "гадз.", hrs = "гадз.", hour = "гадз.", hours = "гадз." }
+local function egs_word(w)                             -- school / weapon / creature / stat name → Belarusian or nil
+    local be = W.ui_be(w)
+    return be and be ~= w and W.ours(be) and not be:find("[A-Za-z][A-Za-z]") and be or nil
+end
+local function egs_label(l)
+    if EGS_L[l] then return EGS_L[l] end
+    local x = l:match("^(.+) Spell Damage$")
+    if x then x = egs_word(x); return x and EGS_L["Spell Damage"] .. " (" .. x .. ")" end
+    x = l:match("^(.+) Skill$")
+    if x then x = egs_word(x); return x and "Навык (" .. x .. ")" end
+    for _, base in ipairs({ "Spell Damage", "Attack Power" }) do
+        x = l:match("^" .. base .. " vs (.+)$")
+        if x then x = egs_word(x); return x and EGS_L[base] .. " (" .. x .. ")" end
+    end
+    x = l:match("^(.+) per 5 sec$")
+    if x then x = egs_word(x); return x and x .. " за 5 сек." end
+    return egs_word(l)
+end
+local egs_item
+local function egs_paren(inner)                        -- "(+2 AP)" or "(1 hour)"
+    local n, u = inner:match("^(%d+) (%a+)$")
+    if n and EGS_UNIT[u:lower()] then return n .. " " .. EGS_UNIT[u:lower()] end
+    return egs_item(inner)
+end
+function egs_item(s)                                   -- "+12 Spell Damage", "+1% Hit", "+10 Intellect (+2 AP)"
+    local sign, rest = s:match("^([%+%-][%d%.,]+%%?) (.+)$")
+    if not sign then return nil end
+    local label, inner = rest:match("^(.-) %((.+)%)$")
+    label = label or rest
+    local lb = egs_label(label)
+    if not lb then return nil end
+    if inner then
+        local ib = egs_paren(inner)
+        if not ib then return nil end
+        return sign .. " " .. lb .. " (" .. ib .. ")"
+    end
+    return sign .. " " .. lb
+end
+local EGS_FOOD = {
+    { "^(%d[%d,%. ]*) health and (%d[%d,%. ]*) mana over (%d+) sec$", "%s здароўя і %s маны за %s сек." },
+    { "^(%d[%d,%. ]*) health over (%d+) sec$", "%s здароўя за %s сек." },
+    { "^(%d[%d,%. ]*) mana over (%d+) sec$", "%s маны за %s сек." },
+}
+local function egs_list(s)                             -- items joined by ", " / " and " / "/" (enchants, Well Fed)
+    local out, pos = {}, 1
+    while pos <= #s do
+        local a, b, sep
+        for _, j in ipairs({ ", ", " and ", "/" }) do
+            local c, d = s:find(j, pos, true)
+            if c and (not a or c < a) then a, b, sep = c, d, j end
+        end
+        local part = s:sub(pos, a and a - 1 or #s)
+        local dur
+        if not a then                                  -- "Well Fed: +1 Strength, +5% XP (15 min)": duration at the end
+            local p, d = part:match("^(.-) %((%d+ %a+)%)$")
+            if p and EGS_UNIT[(d:match("%a+$") or ""):lower()] then part, dur = p, egs_paren(d) end
+        end
+        local be = egs_item(part)
+        if not be then return nil end
+        out[#out + 1] = be .. (dur and " (" .. dur .. ")" or "")
+        if not a then break end
+        out[#out + 1] = sep == " and " and " і " or sep
+        pos = b + 1
+    end
+    return #out > 0 and table.concat(out) or nil
+end
+local function egs_one(s)
+    local head, body = "", s
+    if s:find("^Use: ") then head, body = "Ужыць: ", s:sub(6)
+    elseif s:find("^Well Fed: ") then head, body = "Сытасць: ", s:sub(11) end
+    for _, f in ipairs(EGS_FOOD) do
+        local a, b, c = body:match(f[1])
+        if a then return head .. f[2]:format(a, b, c) end
+    end
+    local be = egs_list(body)
+    return be and head .. be
+end
+local egs_busy = false
+local function egs_line_be(t)
+    if egs_busy or not egs_db() then return nil end
+    local multi = t:find("\n", 1, true)
+    if multi then
+        if not (t:find("^[%+%-]%d") or t:find("\n[%+%-]%d") or t:find("\nWell Fed: ")) then return nil end
+    elseif not (t:find("^[%+%-]%d") or t:find("^Use: [%+%d]")) then
+        return nil
+    end
+    -- the label lookups (ui_be) can come back into tooltip_line_be: inside, EGS forms are not tried again
+    egs_busy = true
+    local ok, r = pcall(function()
+        local out = {}
+        for seg in (t .. "\n"):gmatch("(.-)\n") do
+            local be = egs_one(seg)
+            -- "Equip: Increases healing done by up to 22." = the half of a split line whose option is off
+            if not be then be = tooltip_line_be(seg) end
+            if not be then return nil end
+            out[#out + 1] = be
+        end
+        return table.concat(out, "\n")
+    end)
+    egs_busy = false
+    return ok and r or nil
+end
+local tooltip_line_uncached
+local egs_late = false
 function tooltip_line_be(t)
     t = plain(t)
     if not t then return nil end
+    -- EasyGreenStats: a line it may still shorten waits for the late pass (W.hook_egs), which runs after EGS's own
+    if not egs_late and W.egs_skip(t) then return nil end
+    local c = tl_cache[W.current_tooltip_female and true or false]
+    local v = c[t]
+    if v ~= nil then return v or nil end
+    if W.ours(t) then
+        local bare = t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|[TA].-|[ta]", "")
+        if not bare:find("%a%a") then c[t] = false; return nil end
+    end
+    local be = tooltip_line_uncached(t)
+    if tl_n > 3000 then tl_wipe(); c = tl_cache[W.current_tooltip_female and true or false] end
+    c[t] = be or false; tl_n = tl_n + 1
+    return be
+end
+function tooltip_line_uncached(t)
+    local egs = egs_line_be(t)
+    if egs then return egs end
     -- named colours "|cnRED_FONT_COLOR:Cooking Fire|r" (a missing recipe tool, R662): every rule below knows only the
     -- hex form → each named colour becomes a placeholder hex for the lookup and is put back in the result
     if t:find("|cn", 1, true) then
@@ -309,6 +478,45 @@ function tooltip_line_core(t)
     return be
 end
 W.tooltip_line_be = tooltip_line_be
+-- EasyGreenStats late pass: registered at PLAYER_LOGIN, so it runs after EGS's tooltip post-call (registered at EGS's
+-- ADDON_LOADED); once more after EGS's own 0.2 s re-check. Its short lines and the long ones it left → Belarusian; a
+-- "Use:" line goes the Item pre-call's way (by the item's spell), so it reads exactly as without EGS.
+local function egs_pass(tt)
+    if not (egs_db() and W.on("ui") and tt and tt.GetName and tt:GetName()) then return end
+    if (tt.IsForbidden and tt:IsForbidden()) or W.TIP.secret[tt] or W.dual_active(tt) then return end
+    local n = tt:GetName()
+    local data = tt.GetPrimaryTooltipData and tt:GetPrimaryTooltipData()
+    local item = data and W.sid_ok(data.type) == 0 and W.sid_ok(data.id)
+    local changed = false
+    egs_late = true
+    for i = 2, tt:NumLines() do
+        local fs = _G[n .. "TextLeft" .. i]
+        local t = fs and plain(fs:GetText())
+        local short = t and t ~= "" and not W.ours(t) and egs_line_be(t)       -- EGS's short form
+        if short then
+            fs:SetText(short); changed = true
+        elseif t and t ~= "" and not W.ours(t) and W.egs_skip(t) then          -- a long line EGS left
+            local be = (item and t:find("^Use: ") and W.item_use_be(item, t)) or tooltip_line_be(t)
+            if be and be ~= t then fs:SetText(be); changed = true end
+        end
+    end
+    egs_late = false
+    if changed then tt:Show() end
+end
+function W.hook_egs()
+    if W.egs_hooked or not (C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EasyGreenStats")) then return end
+    if not (TooltipDataProcessor and Enum and Enum.TooltipDataType) then return end
+    W.egs_hooked = true
+    -- the same per-type lists EGS registers on (Item, Spell): registered later, so called after it
+    local function late(tt)
+        if not pcall(egs_pass, tt) then egs_late = false end
+        C_Timer.After(0.25, function()
+            if tt:IsShown() and not pcall(egs_pass, tt) then egs_late = false end
+        end)
+    end
+    W.TIP.post(Enum.TooltipDataType.Item, late)
+    W.TIP.post(Enum.TooltipDataType.Spell, late)
+end
 -- unit tooltips: the class line ("Warrior" → «Ваяр») in its class colour (owner 2026-10-07; WoW fonts have no bold)
 local function class_coloured(en, be)
     if W.RU then en = W.en_line(en) end                  -- «Друид» → "Druid" (R665)
@@ -507,7 +715,19 @@ end
 local tt_busy = false
 -- minimap blips (hover): the engine writes NPC names / quest titles into GameTooltip, several blips as
 -- "Name\nName2", sometimes after a |T..|t icon. Each line is a whole name or title -> N / quest log EN title.
+-- R1017 (perf audit: every tooltip line walked the whole quest log + W.be_title per quest): built once, rebuilt lazily
+-- after the log changes (QUEST_LOG_UPDATE / ACCEPTED / REMOVED / TURNED_IN) or W.refresh (language, name option)
+local lt_m, lt_ids, lt_dirty = {}, {}, true
+function W.qtitles_dirty() lt_dirty = true end
+do
+    local qf = CreateFrame("Frame")
+    for _, ev in ipairs({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN", "PLAYER_ENTERING_WORLD" }) do
+        pcall(qf.RegisterEvent, qf, ev)
+    end
+    qf:SetScript("OnEvent", function() lt_dirty = true end)
+end
 local function log_titles()
+    if not lt_dirty then return lt_m, lt_ids end
     local m, ids = {}, {}
     if not (C_QuestLog and C_QuestLog.GetNumQuestLogEntries) then return m, ids end
     for i = 1, C_QuestLog.GetNumQuestLogEntries() do
@@ -515,6 +735,7 @@ local function log_titles()
         local en = info and not info.isHeader and info.questID and plain(info.title)
         if en then m[en] = W.be_title(info.questID); ids[en] = info.questID end
     end
+    lt_m, lt_ids, lt_dirty = m, ids, false
     return m, ids
 end
 -- quest lines in unit / object tooltips: "The Enchanted Glade" (line type QuestTitle = 17) and its objectives
@@ -610,11 +831,14 @@ local function tr_minimap_tooltip(tt)
     if owner == nil then on_mm = true end
     -- minimap blips on this client: tooltip data type MinimapMouseover (21), owner = UIParent, the names / titles as
     -- ONE line separated by \n (/wowby tt, 2026-09-30)
-    if not on_mm then
-        local d = tt.GetPrimaryTooltipData and tt:GetPrimaryTooltipData()
-        local mmt = Enum and Enum.TooltipDataType and Enum.TooltipDataType.MinimapMouseover or 21
-        if d and d.type == mmt then on_mm = true end
-    end
+    -- R1018 (harvests 2026-11-15..19: "Died here", "Fought here for 1 min", "LFG Forever" — other addons' map pins):
+    -- only the ENGINE's blips (data type MinimapMouseover) are harvested; addon pins are still translated, never collected
+    local d = tt.GetPrimaryTooltipData and tt:GetPrimaryTooltipData()
+    local mmt = Enum and Enum.TooltipDataType and Enum.TooltipDataType.MinimapMouseover or 21
+    -- R1021: the data can be stale — an addon's minimap button (EasyGreenStats "Left-click: settings", Social Diary)
+    -- drew plain lines over the last blip's data and got harvested → the owner must be the Minimap itself
+    local engine_blip = d and d.type == mmt and tt.GetOwner and tt:GetOwner() == _G.Minimap
+    if not on_mm and engine_blip then on_mm = true end
     if not on_mm or not W.is_be() then return false end
     local n, titles, changed = tt.GetName and tt:GetName(), nil, false
     local tids, cur_qid
@@ -664,7 +888,7 @@ local function tr_minimap_tooltip(tt)
                 if not be and W.on("ui") then be = W.ui_be(key) end
                 -- R646: unknown minimap places ("Valanaar Inn") were never collected → harvested as objects; only
                 -- several-word plain text (player names have no spaces; colour codes / links are skipped)
-                if not be and key:find(" ") and not key:find("|", 1, true) and not W.ours(key) and #key < 60 then
+                if not be and engine_blip and key:find(" ") and not key:find("|", 1, true) and not W.ours(key) and #key < 60 then
                     W.harvest("objects", key)
                 end
                 if not be then return nil end

@@ -18,8 +18,10 @@ OUT = os.path.join(ROOT, "translate")
 # ru, similar, be_current, desc…), MAX_ITEMS only as a safety cap. Before: per-package item caps + 18000 EN chars;
 # the caps kept missing when text got shorter (gossip 43% on 10-07, the short wowhead quotes ~50% on 10-17).
 # 45000 = the payload of the tested big chunks (quests_natural / gossip_natural / gossip medians 38–47k).
-MAX_CHARS = 45000
-MAX_ITEMS = 600
+# R1025 (owner 2026-11-20): 90000 = one sub-agent's batch (translate/tools/progress.py BATCH_CHARS): one chunk = one
+# agent's work, sized by characters; the rules (~62 KB) are read once per 90k instead of once per 45k.
+MAX_CHARS = 90000
+MAX_ITEMS = 1200
 # (EN limit 7000 until 2026-09-30: each sub-agent reads ~62 KB of rules per chunk, so bigger chunks save budget; long
 # help texts are split so no chunk is >~3x the median)
 ORDER = ["itemsets", "enchants", "suffixes", "quests", "objectives", "zones", "names", "titles", "chartitles", "factions", "focus", "ui_prof", "ui", "gossip", "items", "spellnames", "auras", "spelldesc", "flavor", "item_text", "db2_misc", "barber", "emotes", "achievements", "books", "quests_gender", "quests_namefix", "quests_address", "quests_unify", "quests_itemfix", "quests_speaker", "ui_termfix", "items_redo", "items_hidden", "spellnames_redo", "quests_update", "quests_classic_update", "quests_classic_update2", "spellnames_redo2", "spelldesc_redo", "stylefix", "quests_capfix", "names_qa", "zones_qa", "quests_natural", "gossip_natural", "ui_later", "ui_unused"]

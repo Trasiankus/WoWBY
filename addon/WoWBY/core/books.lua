@@ -63,13 +63,19 @@ local function tr_title(frame)
     if be and frame.SetTitle then frame:SetTitle(be) end
 end
 
+-- R1024 (harvest 2026-11-20): a player's own letter ("Plain Letter": "heyho, danaty dla dzeda", a Belarusian one) is not
+-- game text — such pages have a sender (ItemTextGetCreator) → never harvested; nor text that is already Belarusian
+local function harvest_page(en, page)
+    if plain(ItemTextGetCreator and ItemTextGetCreator()) or W.ours(en) then return end
+    W.harvest("books", token_key(page_key(en)), { title = plain(ItemTextGetItem and ItemTextGetItem()) or "", page = page })
+end
+
 local function tr_page(frame)
     local en = plain(ItemTextGetText and ItemTextGetText())
     if not en or en == "" then return end
     local be = W.book_be(en)
     if not be then
-        W.harvest("books", token_key(page_key(en)), { title = plain(ItemTextGetItem and ItemTextGetItem()) or "",
-                                           page = ItemTextGetPage and ItemTextGetPage() or 0 })
+        harvest_page(en, ItemTextGetPage and ItemTextGetPage() or 0)
         return
     end
     be = W.substitute(be)
@@ -118,7 +124,7 @@ function W.dui_book_wrap(c)
                     if be then
                         d.pageTexts[page] = W.substitute(be)
                     else
-                        W.harvest("books", token_key(page_key(en)), { title = plain(ItemTextGetItem and ItemTextGetItem()) or "", page = page })
+                        harvest_page(en, page)
                     end
                 end
             end

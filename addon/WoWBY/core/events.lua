@@ -45,11 +45,32 @@ f:SetScript("OnEvent", function(_, event, arg1)
         W.hook_messages()
         for _, step in ipairs({ "apply_labels", "apply_standings", "patch_fonts", "create_minimap_button", "hook_panels",
                                "hook_tooltips", "hook_tracker", "hook_bags", "hook_dialogueui", "hook_spellbook",
-                               "hook_trainer", "hook_toasts", "hook_castbar", "hook_mail", "hook_loot", "hook_mirror", "hook_merchant", "hook_skills", "hook_auction", "hook_zones", "hook_popups", "hook_shard", "hook_books", "hook_chat_header", "apply_chat_words", "unit_static_labels", "hook_calendar", "hook_bubbles", "hook_subtitles", "hook_buff_times", "hook_helptips", "hook_tutorial_pointers", "hook_damage_meter", "harvest_default", "nameonly_default", "prune_harvest", "hook_tabs", "hook_recipe_toast", "hook_loot_toast", "apply_search_boxes", "apply_chat_tabs", "hook_achievement_toast", "hook_cinematic", "hook_deathrecap", "hook_bag_search", "hook_recipe_tracker", "hook_npc_titles", "register_options", "register_emote_cmds", "ru_report" }) do
+                               "hook_trainer", "hook_toasts", "hook_castbar", "hook_mail", "hook_loot", "hook_mirror", "hook_merchant", "hook_skills", "hook_auction", "hook_zones", "hook_popups", "hook_shard", "hook_books", "hook_chat_header", "apply_chat_words", "unit_static_labels", "hook_calendar", "hook_bubbles", "hook_subtitles", "hook_buff_times", "hook_helptips", "hook_tutorial_pointers", "hook_damage_meter", "harvest_default", "nameonly_default", "prune_harvest", "hook_tabs", "hook_recipe_toast", "hook_loot_toast", "apply_search_boxes", "apply_chat_tabs", "hook_achievement_toast", "hook_cinematic", "hook_deathrecap", "hook_bag_search", "hook_recipe_tracker", "hook_npc_titles", "hook_egs", "register_options", "register_emote_cmds", "ru_report" }) do
             W.safe(step)
         end
         WoWBY_DB.np_players, WoWBY_DB.np_shadow = nil, nil   -- options removed (R224): defaults = labels on, no shadow
         C_Timer.After(1, W.tr_tracker_headers)
+        -- R1020 (owner /wowby prof, 54 min: averages tiny, but single calls of 18.9 ms (a tooltip line) and 9.5 ms (an item
+        -- tooltip) = the lookup indexes built on FIRST use, mid-play): each index is built after login instead, one per
+        -- second, never in combat (a step waits for the fight to end)
+        local warm = {
+            function() if W.desc_keys_by_start then W.desc_keys_by_start("Increases") end end,
+            function() if W.qtitle_be then W.qtitle_be("\1warmup") end end,
+            function() if W.gossip_be then W.gossip_be("\1warmup") end end,
+            function() if W.book_be then W.book_be("\1warmup") end end,
+            function() if W.tooltip_line_be then W.tooltip_line_be("Requires Level 10") end end,
+            function() if W.ours then W.ours("Свет") end end,
+        }
+        local wi = 0
+        local function warm_next()
+            wi = wi + 1
+            local fn = warm[wi]
+            if not fn then return end
+            if InCombatLockdown() then wi = wi - 1; C_Timer.After(2, warm_next); return end
+            pcall(fn)
+            C_Timer.After(1, warm_next)
+        end
+        C_Timer.After(5, warm_next)
         C_Timer.After(2, W.refresh_fonts); C_Timer.After(8, W.refresh_fonts)
         -- re-apply the name-only CVars every login: settings added after the option was switched on
         -- (nameplateMinScale) would otherwise never reach clients that had it on already

@@ -127,7 +127,7 @@ do
     end
     function W.TIP.pre(kind, fn)
         if not (TDP and TDP.AddTooltipPreCall and kind) then return end
-        TDP.AddTooltipPreCall(kind, function(tt, data)
+        TDP.AddTooltipPreCall(kind, W.timed("tip pre " .. tostring(kind), function(tt, data)
             local bad = data_unsafe(data)
             if tt then secret[tt] = bad or nil end
             if bad then return end
@@ -148,25 +148,37 @@ do
             local c = dual_for(tt, data, kind)
             if c then return fn(tt, c) end                   -- translate the copy; the drawn card stays English
             if tt and dual_src[tt] ~= data then W.TIP.dual[tt] = nil; dual_src[tt] = nil; W.dual_hide(tt) end
-            return fn(tt, data)
-        end)
+            -- EasyGreenStats (tooltips.lua W.egs_skip): its lines stay English for it to shorten; the post pass translates
+            local keep
+            if W.egs_skip and W.egs_db and W.egs_db() and type(data) == "table" and type(data.lines) == "table" then
+                for i, l in ipairs(data.lines) do
+                    local t = plain(l.leftText)
+                    if t and W.egs_skip(t) then keep = keep or {}; keep[i] = t end
+                end
+            end
+            if not keep then return fn(tt, data) end
+            local r = fn(tt, data)
+            for i, t in pairs(keep) do if data.lines[i] then data.lines[i].leftText = t end end
+            return r
+        end))
     end
     function W.TIP.line(kind, fn)
         if not (TDP and TDP.AddLinePreCall and kind) then return end
         line_fns[#line_fns + 1] = fn
-        TDP.AddLinePreCall(kind, function(tt, ld)
+        TDP.AddLinePreCall(kind, W.timed("tip line " .. tostring(kind), function(tt, ld)
             if (tt and secret[tt]) or data_unsafe({ lines = { ld } }) then return end
             if tt and (W.TIP.dual[tt] or W.TIP.plain[tt]) then return end   -- bilingual: English card as is
+            if W.egs_skip and W.egs_skip(plain(ld.leftText)) then return end -- EasyGreenStats shortens it first
             return fn(tt, ld)
-        end)
+        end))
     end
     function W.TIP.post(kind, fn)
         if not (TDP and TDP.AddTooltipPostCall and kind) then return end
-        TDP.AddTooltipPostCall(kind, function(tt, data)
+        TDP.AddTooltipPostCall(kind, W.timed("tip post " .. tostring(kind), function(tt, data)
             if (tt and secret[tt]) or data_unsafe(data) then return end
             if tt and (W.TIP.dual[tt] or W.TIP.plain[tt]) then return end
             return fn(tt, data)
-        end)
+        end))
     end
     local function rgb(c) if type(c) == "table" and c.GetRGB then return c:GetRGB() end return 1, 1, 1 end
     local SELL_PRICE = Enum and Enum.TooltipDataLineType and Enum.TooltipDataLineType.SellPrice
@@ -317,6 +329,25 @@ function W.log_error(msg)
     local e = WoWBY_DB.errors
     table.insert(e, 1, date("%Y-%m-%d %H:%M ") .. tostring(msg))
     for i = #e, 21, -1 do e[i] = nil end
+end
+-- R1015 (tester 2026-11-19: stutters on quest progress): a per-entry-point timer. W.timed(name, fn) wraps a callback;
+-- while /wowby prof runs, each call adds its time (debugprofilestop, ms) to W.prof_t[name] = {n, t, max}. Off = one
+-- boolean test per call.
+W.prof_on, W.prof_t = false, {}
+local function prof_done(name, t0, ...)
+    local dt = debugprofilestop() - t0
+    local e = W.prof_t[name]
+    if not e then e = { n = 0, t = 0, max = 0 }; W.prof_t[name] = e end
+    e.n, e.t = e.n + 1, e.t + dt
+    if dt > e.max then e.max = dt end
+    return ...
+end
+function W.timed(name, fn)
+    if not debugprofilestop then return fn end
+    return function(...)
+        if not W.prof_on then return fn(...) end
+        return prof_done(name, debugprofilestop(), fn(...))
+    end
 end
 function W.safe(name, ...)
     local fn = W[name]
@@ -665,10 +696,24 @@ local function esc_pat(s) return (s:gsub("%p", "%%%0")) end
 -- «$Gнакіраваў:накіравала;» in an NPC greeting. Rendering twice is harmless (no tokens left after the first).
 local gossip_raw, gossip_norm, gossip_norm_index, gossip_other_name
 -- the player's own name / race / class in a text → $N / $R / $C (gossip lookup and harvest)
+W.COMMON_WORD_NAMES = {
+    one = true, two = true, three = true, hope = true, faith = true, grace = true, will = true, may = true, mark = true,
+    rose = true, ash = true, storm = true, light = true, dawn = true, sky = true, wind = true, star = true, sun = true,
+    moon = true, night = true, shadow = true, death = true, fire = true, frost = true, stone = true, iron = true, gold = true,
+    silver = true, hunter = true, friend = true, hero = true, king = true, queen = true, lord = true, lady = true, sir = true,
+    time = true, well = true, here = true, now = true, yes = true, no = true, bear = true, wolf = true, raven = true,
+    fang = true, blade = true, spirit = true, soul = true, truth = true, honor = true, glory = true, justice = true,
+}
+local COMMON_WORD_NAMES = W.COMMON_WORD_NAMES
 function W.player_tokens(t)
     local k = t
     local me = plain(UnitName("player"))
-    if me and me ~= "" then k = k:gsub(esc_pat(me), "$N") end
+    -- R1019 (owner 2026-11-19: "It's time, stranger. One way or another…" was saved as "$N way or another" — the collector
+    -- played a character named One): the name is replaced as a whole word only, and never when it is a common English
+    -- word the texts use on their own
+    if me and me ~= "" and not COMMON_WORD_NAMES[me:lower()] then
+        k = k:gsub("%f[%a]" .. esc_pat(me) .. "%f[%A]", "$N")
+    end
     -- EN "$c" renders lowercase ("I am sorry, druid, …", R355) → the lowercase class / race is replaced too
     -- (whole words only: "mage" inside "damage")
     local function word(s) return "%f[%a]" .. esc_pat(s:lower()) .. "%f[%A]" end
@@ -787,8 +832,14 @@ function W.substitute(text, qid, en)
     -- English class / race names (R665: a ruRU client gives Russian ones; core/ru.lua maps them by the class / race file)
     local cls = W.player_class_en and W.player_class_en() or (UnitClass("player"))
     local race = W.player_race_en and W.player_race_en() or (UnitRace("player"))
-    local RM, RF = {}, {}
-    for k, v in pairs(W.RACES) do RM[k], RF[k] = v[1], v[2] end
+    -- R1017: race forms split once (was rebuilt from W.RACES on every substitute call)
+    local rr = W._race_mf
+    if not rr then
+        rr = { {}, {} }
+        for k, v in pairs(W.RACES) do rr[1][k], rr[2][k] = v[1], v[2] end
+        W._race_mf = rr
+    end
+    local RM, RF = rr[1], rr[2]
     local src = text
     -- "$c3" (case digit) before a bare "$c": the digit belongs to the token, never left behind as «шаман3»
     text = gsub(src, "()%$[Cc]([1-6]?)", function(p, d)

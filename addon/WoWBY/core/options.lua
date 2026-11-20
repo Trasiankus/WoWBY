@@ -415,6 +415,30 @@ end
 SlashCmdList["WOWBY"] = function(msg)
     msg = W.strtrim((msg or ""):lower())
     if msg == "demo" or msg == "demo off" then demo_harvest(msg == "demo"); return end
+    -- R1015: /wowby prof = start timing WoWBY's entry points (tooltips, chat filters, centre messages, tracker,
+    -- nameplates); /wowby prof again = stop and print the top 12 by total time (+ calls, worst single call), also saved
+    -- to WoWBY_DB.prof for a harvest-style paste
+    if msg == "prof" then
+        if not W.prof_on then
+            wipe(W.prof_t); W.prof_on = true; W.prof_start = GetTime()
+            print("|cff8080ffWoWBY:|r вымярэнне пачата — пагуляйце (бой, заданні), потым зноў /wowby prof")
+            return
+        end
+        W.prof_on = false
+        local rows = {}
+        for name, e in pairs(W.prof_t) do rows[#rows + 1] = { name, e } end
+        table.sort(rows, function(a, b) return a[2].t > b[2].t end)
+        local secs = GetTime() - (W.prof_start or GetTime())
+        print(("|cff8080ffWoWBY:|r %.0f с вымярэння, мс усяго / выклікі / найгоршы выклік:"):format(secs))
+        local out = {}
+        for i = 1, math.min(12, #rows) do
+            local n, e = rows[i][1], rows[i][2]
+            local line = ("%s: %.1f / %d / %.2f"):format(n, e.t, e.n, e.max)
+            print("  " .. line); out[#out + 1] = line
+        end
+        WoWBY_DB.prof = { at = date("%Y-%m-%d %H:%M"), secs = secs, rows = out }
+        return
+    end
     -- R975 (owner 2026-11-13: stutters while moving / questing): which WoWBY functions eat the CPU. Needs the game's
     -- script profiler: /console scriptProfile 1 → /reload → play a few minutes → /wowby perf (saved to WoWBY_DB.perf).
     -- Switch the profiler off afterwards (/console scriptProfile 0 + /reload): it slows every addon down.

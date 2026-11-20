@@ -603,13 +603,14 @@ local function trk_set(fs)
     if info.header then pcall(W.swap_title, fs, info.qid) else pcall(tr_obj_fs, fs, info.qid) end
     trk_busy = false
 end
+W.trk_set_t = W.timed("tracker line", trk_set)       -- R1015 profiler
 local function trk_hook(fs, qid, header)
     if not fs then return end
     local info = trk_fs[fs]
     if not info then
         info = {}
         trk_fs[fs] = info
-        pcall(hooksecurefunc, fs, "SetText", trk_set)
+        pcall(hooksecurefunc, fs, "SetText", W.trk_set_t)
     end
     info.qid, info.header = qid, header                   -- pooled lines move between quests: keep current
 end
@@ -654,7 +655,7 @@ end
 for _, m in ipairs({ _G.QuestObjectiveTracker, _G.CampaignQuestObjectiveTracker }) do
     -- pcall (R741, owner screenshot 2026-10-23: an abandoned quest stayed in the tracker until the language switch):
     -- an error here propagates into Blizzard's module Update, which then skips EndLayout — where unused blocks are freed
-    if m and m.LayoutContents then hooksecurefunc(m, "LayoutContents", function(mod) pcall(tracker_post, mod) end) end
+    if m and m.LayoutContents then hooksecurefunc(m, "LayoutContents", W.timed("tracker layout", function(mod) pcall(tracker_post, mod) end)) end
 end
 
 -- ---------- quest log details pane: buttons + "Rewards" header (exact-label swap) ----------
@@ -728,11 +729,7 @@ end
 if _G.QuestFrameGreetingPanel then
     QuestFrameGreetingPanel:HookScript("OnShow", function() pcall(tr_greeting) end)
 end
--- R981 (owner 2026-11-13, Rezlak: titles English): on QUEST_LOG_UPDATE Blizzard calls QuestFrameGreetingPanel_OnShow
--- DIRECTLY (not through the OnShow script) and rebuilds the list in English → hook the global too
-if _G.QuestFrameGreetingPanel_OnShow then
-    hooksecurefunc("QuestFrameGreetingPanel_OnShow", function() pcall(tr_greeting) end)
-end
+-- (R981 had hooked QuestFrameGreetingPanel_OnShow a second time — removed in R1017: the R950 hook below does it)
 -- R950 (owner screenshot: after accepting one quest the list went English): QUEST_LOG_UPDATE redraws the open greeting by
 -- calling QuestFrameGreetingPanel_OnShow directly, not through OnShow → post-hook the function too
 if _G.QuestFrameGreetingPanel_OnShow then

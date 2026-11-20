@@ -172,6 +172,15 @@ def book_cache():
     was written, 2026-10-06), so take the record's readable UTF-8 runs: the longest run of >= 20 chars is the page."""
     out = []
     for rid, b in wdb_records("pagetextcache"):
+        # R1023 (2026-11-20, 17 records read): u32 page id, u32 next page, 5 zero bytes, then the text length as 12 bits
+        # in bytes 13-14 (high nibble first), the text from byte 15. The readable-run guess below took byte 14 too when
+        # it was printable ("P", "@", "`", "!@If anyone finds this…") → 7 page keys that never matched in game.
+        if len(b) > 15:
+            n = ((b[13] << 8) | b[14]) >> 4
+            if 15 + n == len(b) or (15 + n < len(b) and n >= 20):
+                t = b[15:15 + n].decode("utf-8", "ignore").strip()
+                if t:
+                    out.append((rid, t)); continue
         runs = [r.decode("utf-8", "ignore") for r in re.findall(rb"[\x09\x0a\x0d\x20-\x7e\x80-\xff]{20,}", b)]
         runs = [r.strip() for r in runs if r.strip()]
         if runs:

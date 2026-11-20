@@ -320,6 +320,10 @@ function ui_be_core(t)
         local base, rk = t:match("^(.-) %(Rank (%d+)%)$")
         sb = base and W.spell_name_be(base)
         if sb then return sb .. " (ранг " .. rk .. ")" end
+        -- R1022 (owner screenshot, Auctionator list): a whole item name with its random suffix too — "%s of %s" (= "3 of
+        -- 10") + the UI word Bear had made "Birchwood Maul of the Bear" «Бярозавая кувалда з Мядзведзь»
+        local ib = W.item_name_be and W.item_name_be(t)
+        if ib and ib ~= t then return ib end
     end
     -- item resistance line "+8 Fire Resistance" (ITEM_RESIST_SINGLE builds it from a bare school word) -> the school in
     -- the DATIVE like the stat names: «+8 да супраціўлення агню» (owner 2026-10-01; was «… супраціўлення: агонь»)
@@ -629,13 +633,22 @@ local function other_addon_canvas(frame)
     local sp = _G.SettingsPanel
     return sp and sp.Container and frame == sp.Container.SettingsCanvas
 end
+-- R1017 (perf audit: the 1 s ticker of an open panel re-translated EVERY FontString each second): a string whose text is
+-- still what our last pass left there is skipped (its own SetText hook covers Blizzard's writes; a write that bypasses
+-- the hook changes the text, so it is seen next tick)
+local panel_seen = setmetatable({}, { __mode = "k" })
 local function retext_tree(frame, ctx)
     W.each_fs(frame, 12, function(r)
         if ctx then fs_ctx[r] = ctx end
         hook_fs(r)
-        fs_busy = true; W.retext_fs(r); fs_busy = false
+        local cur = plain(r:GetText())
+        if cur == nil or panel_seen[r] ~= cur then
+            fs_busy = true; W.retext_fs(r); fs_busy = false
+            panel_seen[r] = plain(r:GetText())
+        end
     end, other_addon_canvas)
 end
+function W.panel_seen_wipe() wipe(panel_seen) end
 -- (GameMenuFrame is not here: own hook-free pass, hook_game_menu — R29)
 -- tab-system tabs (talent window Primary / Secondary, R225): the tab keeps its EN in self.tabText and UpdateTabText
 -- re-applies it on every update → post-hook Init / UpdateTabText (mixin methods: the talent window loads after WoWBY)

@@ -10,7 +10,7 @@ WoWBY_DB.harvest[<locale>] = { quests = {[id] = {t,d,o,p,c}}, names = {[EN] = tr
 A quest can also hold "<field>#<hash>" = a live text that differs from our source (R510); merged like any field, each
 hash its own key, so a variant never overwrites the normal entry.
 Play with the enUS client for source text; a ruRU session adds Russian references."""
-import glob, json, os, sys
+import glob, json, os, re, sys
 import lupa
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -48,14 +48,30 @@ def main():
     merge(merged)
 
 
+# R1027 (2026-11-20): other addons' minimap buttons / map pins were collected as world-object names before the addon's
+# owner == Minimap check (EasyGreenStats "Left-click: settings", Social Diary "Died here", "Today from 22:34 to 22:37,
+# level 7", LFG Forever) — old SavedVariables still hold them, so they are dropped here on every import
+ADDON_JUNK = re.compile(r"^(?:Left|Right|Middle|Shift|Ctrl|Alt)[- ]?[Cc]lick\b|^Drag(?::| to\b)|\bclick (?:to|for)\b|"
+                        r"^(?:Died here|Fought here\b|Today from \d|Relationship status|Social Diary|LFG Forever)|"
+                        r"\b\d{1,2}:\d{2} to \d{1,2}:\d{2}\b|^Unknown$")
+
+
+def junk(kind, k):
+    return kind in ("objects", "names") and isinstance(k, str) and bool(ADDON_JUNK.search(k))
+
+
 def merge(merged):
     """Accumulate {locale: {kind: {key: value}}} into data/harvest.json (also used by tools/import_paste.py, R965)."""
     out = os.path.join(ROOT, "data", "harvest.json")
     old = json.load(open(out, encoding="utf-8")) if os.path.exists(out) else {}
+    for kinds in old.values():                            # entries collected before the filter existed
+        for kind, items in kinds.items():
+            for k in [k for k in items if junk(kind, k)]: del items[k]
     for loc, kinds in merged.items():                     # accumulate across sessions / resets
         for kind, items in kinds.items():
             d = old.setdefault(loc, {}).setdefault(kind, {})
             for k, v in items.items():
+                if junk(kind, k): continue
                 if kind == "quests" and isinstance(d.get(k), dict):
                     d[k].update(v)
                 else:

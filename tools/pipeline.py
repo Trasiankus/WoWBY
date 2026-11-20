@@ -116,6 +116,11 @@ def addon():
         print("Nothing new from the translator since the last merge (rebuilding anyway: rules / hand edits apply).")
     out = run("import translator output", ["tools/import_translations.py"], capture=True)
     print(out.strip().splitlines()[-2] if out.strip() else "")
+    # standing QA, layer 2 (owner 2026-11-20): the full dictionary / grammar scan on the chunks new since the last build
+    if fresh and had_state:
+        qa = run("QA of new translations", ["tools/qa_new.py"] + [os.path.join(ROOT, k) for k in fresh],
+                 capture=True, ok_codes=(0, 1))
+        for l in qa.strip().splitlines()[:6]: print(l)
     chk = run("check owner rules", ["tools/fix_corpus.py", "--check"], capture=True, ok_codes=(0, 1))   # 1 = found texts to fix (reported, not fatal)
     last = chk.strip().splitlines()[-1] if chk.strip() else ""
     print(last)
@@ -205,6 +210,14 @@ def release():
     """CurseForge zip: the usual addon step, then release/WoWBY-<version>.zip (tools/package_release.py), then the
     public repo push (publish)."""
     addon()
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        from qa_new import open_count
+        if open_count():
+            print("WARNING: review/qa_new.md has %d OPEN QA findings in new translations — "
+                  "fix or --ack them (tools/qa_new.py) before this build goes out" % open_count())
+    except Exception:
+        pass
     print(run("CurseForge zip", ["tools/package_release.py"], capture=True))
     publish()
 

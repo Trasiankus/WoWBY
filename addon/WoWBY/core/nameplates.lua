@@ -74,12 +74,20 @@ end
 -- does not flag them on this client): the unit's tooltip lists its quest objectives (line type QuestObjective = 8,
 -- "0/8 Plainstrider Meat"); an unfinished count, or a line without one, = a quest mob. Cached per GUID until the
 -- quest log changes.
-local qmob = {}
+-- R1015 (tester 2026-11-19: a stutter on every quest-item pickup / quest-mob kill, "fireworks" in dungeons): every
+-- QUEST_LOG_UPDATE used to WIPE this cache, so the next ticker pass rebuilt the tooltip of EVERY attackable plate in one
+-- frame. Now an update only bumps qmob_gen; an older answer stays in use until re-checked, and at most QMOB_BUDGET units
+-- per pass are re-checked (a new unit with no answer at all counts against the same budget).
+local qmob, qmob_at = {}, {}
+local qmob_gen, qmob_budget = 0, 0
+local QMOB_BUDGET = 3
 local function quest_mob(unit)
     local guid = W.sid_ok(UnitGUID(unit))
     if not guid then return false end
     local c = qmob[guid]
-    if c ~= nil then return c end
+    if c ~= nil and qmob_at[guid] == qmob_gen then return c end
+    if qmob_budget <= 0 then return c or false end
+    qmob_budget = qmob_budget - 1
     local has = false
     local ok, data = pcall(C_TooltipInfo and C_TooltipInfo.GetUnit or function() end, unit)
     for _, l in ipairs(ok and type(data) == "table" and data.lines or {}) do
@@ -89,13 +97,16 @@ local function quest_mob(unit)
             if t and (not a or tonumber(a) < tonumber(b)) then has = true; break end
         end
     end
-    qmob[guid] = has
+    qmob[guid] = has; qmob_at[guid] = qmob_gen
     return has
 end
 do
     local f = CreateFrame("Frame")
     for _, ev in ipairs({ "QUEST_LOG_UPDATE", "QUEST_TURNED_IN", "QUEST_ACCEPTED", "PLAYER_LEVEL_UP" }) do f:RegisterEvent(ev) end
-    f:SetScript("OnEvent", function() wipe(qcache); wipe(qmob) end)
+    f:SetScript("OnEvent", function(_, ev)
+        wipe(qcache); qmob_gen = qmob_gen + 1
+        if ev ~= "QUEST_LOG_UPDATE" then wipe(qmob); wipe(qmob_at) end   -- rare events: a clean start is fine
+    end)
 end
 local TITLE_EN                                           -- BE title -> EN key (built on first need)
 local function unit_title(unit)
@@ -358,8 +369,10 @@ function W.plate_removed(unit)
 end
 local np_ticker
 function W.style_all_plates()
+    qmob_budget = QMOB_BUDGET
     for _, plate in ipairs(C_NamePlate and C_NamePlate.GetNamePlates() or {}) do style_plate(plate) end
 end
+W.style_all_plates = W.timed("nameplates tick", W.style_all_plates)   -- R1015 profiler
 function W.plate_added(unit)
     local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit(unit)
     if plate and WoWBY_DB and WoWBY_DB.nameonly then style_plate(plate) end
